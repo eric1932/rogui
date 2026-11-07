@@ -8,6 +8,8 @@
 #   rogui/ci.sh run <KoolCenter 固件.pkgtb> [原厂固件.zip]
 #       把两个固件传到草稿 Release「inputs」（同名同大小的不重传），触发 workflow，等它跑完，
 #       把产物下载到 rogui/dist/ci-<编号>/。原厂固件不写时用项目目录里最新的 FW_GT-BE98_Pro_*.zip。
+#       补丁包里文件的修改时间是打包时刻，所以 CI 的固件和本地的不会逐字节相同；要核对的话，
+#       拿 CI 的补丁包在本地 bake 一次，sha256 应该和 CI 的固件一样。
 #       仓库默认取当前目录的 GitHub 仓库，也可以用 REPO=owner/name 指定。
 # workflow 里用（一般不用手动跑）:
 #   rogui/ci.sh fetch <KoolCenter 文件名> <原厂文件名> <下载目录>
@@ -71,7 +73,9 @@ cmd_fetch() {
 cmd_publish() {
 	local dir="$1"; shift
 	local tag="bake-${GITHUB_RUN_NUMBER:?只在 workflow 里用}"
-	local notes="${dir}/notes.md"
+	# 产物目录是 sudo bake.sh 建的，属于 root，说明写到临时文件
+	local notes
+	notes="$(mktemp)"
 	{
 		echo "workflow 第 ${GITHUB_RUN_NUMBER} 次运行：${GITHUB_SERVER_URL}/${REPO}/actions/runs/${GITHUB_RUN_ID}"
 		echo
