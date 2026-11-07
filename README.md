@@ -1,18 +1,16 @@
 # rogui：GT-BE98 Pro 刷 KoolCenter 梅林改版后换回原厂 ROG 界面
 
-> **English:** rogui brings ASUS's stock ROG web UI back to a GT-BE98 Pro running the KoolCenter build of Asuswrt-Merlin (3006.102). The Merlin pages (VPN Director, DNS Director, Tweaks, System Info…) and the KoolCenter Software Center keep working; only the web layer changes. The merged UI is built on your computer from two firmware files you download yourself. There are two ways to put it on the router: **overlay mode** (default) bind-mounts it over `/www` at boot and leaves the firmware untouched; **baked mode** (experimental) builds it into the KoolCenter firmware image, which you then flash, so almost nothing is kept in jffs. Prebuilt baked firmware for some KoolCenter versions is on the [Releases](https://github.com/eric1932/rogui/releases) page. Docs are in Chinese.
+> **English:** rogui brings ASUS's stock ROG web UI back to a GT-BE98 Pro running KoolCenter's Asuswrt-Merlin build (3006.102), keeping the Merlin pages and the KoolCenter Software Center. Use it in **overlay mode** (mounted over `/www` at boot, firmware untouched) or **baked mode** (built into the firmware you flash). Prebuilt files are on [Releases](https://github.com/eric1932/rogui/releases). Docs are in Chinese.
 
 ![rogui 的两种方案：挂载版和固件版](docs/rogui-modes.svg)
 
-KoolCenter 梅林改版（3006.102 分支）没有 ROG 皮肤，界面是普通的蓝色华硕界面。rogui 把原厂 ROG 网页和 KoolCenter 的网页合在一起：
+KoolCenter 梅林改版（3006.102 分支）没有 ROG 皮肤，界面是普通的蓝色华硕界面。rogui 把原厂 ROG 网页和 KoolCenter 的网页合在一起，httpd、rc 和软件中心后端都还是 KoolCenter 的：
 
-- 菜单按原厂的顺序排。Merlin 的页面插进原厂对应的菜单里，System Info 和软件中心放在最后。
+- 菜单按原厂的顺序排，Merlin 的页面插进原厂对应的菜单里，System Info 和软件中心放在最后。逐项差别见 [MENU-COMPARE.md](MENU-COMPARE.md)。
 - 原厂有、KoolCenter 界面里没有的页面回来了：Game Dashboard、游戏探测雷达、WiFi 雷达、WTFast、设备加速器。
 - 软件中心照常能用，皮肤自动切成 ROG 版。
 - 原厂的 VPN Fusion（含 Surfshark、NordVPN 一键登录）换成了 Merlin 的 VPN 页面，因为原厂那套要调用 KoolCenter 后端没有的接口。
-- 修了原厂首页和 Game Dashboard 上频段图标的一个 bug。原厂把各个主网络的频段掩码相加，两个网络带同一个频段位时会进位，冲掉别的位，结果 6G 在发、图标却是灭的。rogui 改成了按位或。
-
-只换网页层，httpd、rc 和软件中心后端都还是 KoolCenter 的。菜单逐项的差别见 [MENU-COMPARE.md](MENU-COMPARE.md)。
+- 顺手修了原厂首页和 Game Dashboard 上 6G 在发、频段图标却是灭的 bug。
 
 ## 选哪种方案
 
@@ -23,22 +21,20 @@ KoolCenter 梅林改版（3006.102 分支）没有 ROG 皮肤，界面是普通�
 | 做法 | 开机时把补丁包盖到 `/www` 上，固件不动 | 把合好的网页做进 KoolCenter 固件，刷这个固件 |
 | jffs 占用 | 约 13MB | 不到 10KB |
 | 内存和开机时间 | 约 45MB，开机多约 2 秒 | 不额外占 |
-| 换 KoolCenter 固件时 | 重新打包，再部署 | 重新打包，做固件，再刷机 |
+| 升级 KoolCenter 固件 | 部署新补丁包，刷原版 | 先刷原版，再刷新的固件版；以后的版本可能放不下 |
 | 撤回 | `rogui.sh stop`，马上变回蓝色 | 刷回 KoolCenter 原版固件 |
-| 适合 | 先试试，要能随时撤 | 长期用，固件很少换 |
 
-拿不准就先用挂载版，以后随时可以换成固件版。固件版可以直接下载 [Releases](https://github.com/eric1932/rogui/releases) 里做好的固件，也可以自己做。目前只在 KoolCenter 102.8_0 上实际刷过。
+拿不准就用挂载版，以后随时可以换。固件版适合 jffs 或内存紧张、愿意升级时多刷一次的人。
 
 ## 需要
 
-- **GT-BE98 Pro**（固件里的型号是 `GT-BE98_PRO`；不带 Pro 的 GT-BE98 不行），已经刷了 KoolCenter 梅林改版。测过 KoolCenter 102.7_2、102.8_0，原厂 102_39386、102_39441。
+- **GT-BE98 Pro**（固件里的型号是 `GT-BE98_PRO`；不带 Pro 的 GT-BE98 不行），已经刷了 KoolCenter 梅林改版。
+  - 上机测过 KoolCenter 102.7_2 和 102.8_0；102.9_0 的补丁包和固件版都能做出来、检查通过，还没上机。
+  - 原厂网页用过 102_39386 和 102_39441。
 - 路由器开了 ssh 和 jffs 自定义脚本（KoolCenter 默认开）。
-- 电脑上有 `bash` 和 `python3`，只用标准库，不用装别的。在 macOS 上测过；Windows 可以试 WSL，没测过。固件版另有要求，见「固件版」。
-- 仓库根目录下放两个固件文件：
-  - 你刷的那版 KoolCenter 固件 `.pkgtb`；
-  - 华硕官网 GT-BE98 Pro 支持页下载的原厂固件 `FW_GT-BE98_Pro_*.zip`，用来提取 ROG 网页。有多个时默认用文件名最新的那个。
-
-直接下载 Releases 里做好的固件的话，只需要前两条。
+- 想自己打补丁包，还需要：
+  - 电脑上有 `bash` 和 `python3`，只用标准库。macOS 上测过；Windows 可以试 WSL，没测过。
+  - 仓库根目录下放两个固件文件：你刷的那版 KoolCenter 固件 `.pkgtb`，以及华硕官网 GT-BE98 Pro 支持页下载的原厂固件 `FW_GT-BE98_Pro_*.zip`（用来提取 ROG 网页；有多个时默认用文件名最新的那个）。
 
 ## 安装（挂载版）
 
@@ -50,10 +46,11 @@ cat rogui/dist/rogui-<版本>.tgz | ssh admin@192.168.50.1 'tar xzf - -C /jffs &
 ```
 
 1. 第一行在电脑上拆固件、打补丁包、做静态检查，大约 30 秒，不碰路由器，可以在刷机之前做。
-   - 显示 ✅ 时会打印第二行的完整命令，复制去跑；
-   - 显示 ⚠️ 时**不要部署**。失败的包和检查报告在 `rogui/dist/failed/`，可以附上报告提 issue。
-2. 第二行把包解到 `/jffs/rogui/`，在 `/jffs/scripts/services-start` 加开机自启、在 `service-event-end` 加补回钩子，然后启用。重复执行没有影响。最后一行应该有「已启用 ROG 网页」。
-3. 浏览器按 Cmd+Shift+R（Windows 是 Ctrl+F5）强制刷新，因为路由器给 CSS 设了 1 小时缓存。左侧菜单如果没变，退出再登录一次：菜单缓存在浏览器的 sessionStorage 里。
+   - 显示 ✅ 时会打印第二行的完整命令，复制去跑。
+   - 显示 ⚠️ 时**不要部署**。报告在 `rogui/dist/failed/`，可以附上它提 issue。
+   - [Releases](https://github.com/eric1932/rogui/releases) 里有你这版 KoolCenter 的补丁包 `rogui-*.tgz` 时，也可以直接下载它，跳过这一行。
+2. 第二行把包解到 `/jffs/rogui/`，加上开机自启和服务事件钩子，然后启用。重复执行没有影响。最后一行应该有「已启用 ROG 网页」。
+3. 浏览器按 Cmd+Shift+R（Windows 是 Ctrl+F5）强制刷新，因为路由器给 CSS 设了 1 小时缓存。左侧菜单如果没变，退出再登录一次。
 
 ## 日常
 
@@ -66,43 +63,44 @@ touch /jffs/rogui/disable           # 开机不再启用；删掉这个文件即
 sh /jffs/rogui/rogui.sh uninstall   # 去掉开机自启和钩子，并停用
 ```
 
-下面几条两种方案都适用：
-
-- 补丁包只对**一版** KoolCenter 固件有效，升级固件后要用新固件重新打包。
+- 补丁包只对**一版** KoolCenter 固件有效，升级固件后要换成对应版本的补丁包。
 - 升级固件请在网页上手动上传，不要用「检查更新」或在线升级：KoolCenter 换进来的是原厂的检查脚本，会拿原厂版本号比对，可能引导你刷回原厂。
 - 不要导入原厂固件导出的 `.CFG` 配置文件：导入会绕过 httpd 的 nvram 白名单。
 
 ## 固件版（实验性）
 
-固件版把合好的网页直接做进 KoolCenter 固件：jffs 里只剩 `rogui.sh`，开机不用复制和挂载。代价是每换一版固件都要重做一次，撤回要刷回原版固件。为什么只动了网页、怎么证明的，见「原理」。
+把合好的网页直接做进 KoolCenter 固件：jffs 里只剩 `rogui.sh`，开机不用复制和挂载。为什么只动了网页、怎么证明的，见「原理」。
 
-### 直接下载做好的固件
+### 拿到固件
 
-[Releases](https://github.com/eric1932/rogui/releases) 里每个 Release 对应一版 KoolCenter 固件，名字里写着版本，例如 `rogui-3006_102.8_0-20261107` 对应 KoolCenter 102.8_0。刷它等于换成那一版 KoolCenter，再加上 ROG 网页。这些固件是 GitHub Actions 按下面「自己做固件」的流程做的，逐项对比报告附在 Release 说明里；不是 KoolCenter 或华硕出品。
+- **直接下载**：[Releases](https://github.com/eric1932/rogui/releases) 里每个 Release 对应一版 KoolCenter，例如 `rogui-3006_102.8_0-20261107` 对应 102.8_0。这些固件是 GitHub Actions 按下面的流程做的，逐项对比报告附在 Release 说明里，不是 KoolCenter 或华硕出品。
+  - 下载 `*-rogui-*.pkgtb`、同名的 `.sha256` 和补丁包 `rogui-*.tgz`，放在同一个目录。
+  - 核对：`shasum -a 256 -c *.pkgtb.sha256`（Linux 用 `sha256sum -c`）。
+- **自己做**：先照「安装」第一步打好补丁包。做固件要在 Linux 上用 root 跑，因为要原样保留属主和设备文件，macOS 做不到；还要装 `squashfs-tools`。三选一：
+  - Linux：`sudo rogui/bake.sh <KoolCenter 固件.pkgtb> rogui/dist/rogui-<版本>.tgz`
+  - macOS 装了 Docker：`rogui/bake-docker.sh <KoolCenter 固件.pkgtb> rogui/dist/rogui-<版本>.tgz`。两个文件都要在仓库目录里。
+  - GitHub Actions：fork 本仓库，在 fork 的 Actions 页面启用 workflow（GitHub 对 fork 默认不跑），登录 `gh` 后运行 `rogui/ci.sh run <KoolCenter 固件.pkgtb> [原厂固件.zip]`。产物放进你 fork 里的 Release，默认是草稿，只有你看得到；加 `--public` 才公开，公开就等于分发华硕和 KoolCenter 的固件。
 
-1. 下载 `*-rogui-*.pkgtb`、同名的 `.sha256` 和补丁包 `rogui-*.tgz`，放在同一个目录，核对 sha256：`shasum -a 256 -c *.pkgtb.sha256`（Linux 用 `sha256sum -c`）。
-2. 网页上「系统管理 → 固件升级」，手动上传这个 `.pkgtb`。
-3. 部署补丁包：`cat rogui-<版本>.tgz | ssh admin@192.168.50.1 'tar xzf - -C /jffs && sh /jffs/rogui/rogui.sh install'`。固件版也离不开它：`rogui.sh` 要在开机后和每次服务事件后把 `rc_support` 里的 `rog` 补回去，不然页面背景是白的（见「原理」）。`rogui.sh status` 应显示「挂载: 不需要（固件自带 ROG 网页）」。
-4. 确认没问题后，可以删掉 `/jffs/rogui/overlay.tgz` 省出 jffs，固件版用不到它。
+  对比没通过就不会产出固件，报告在 `rogui/dist/failed/` 或 workflow 运行的摘要页。
 
-撤回和救砖，见下面「自己做固件」的第 5 步。
+### 刷机和部署
 
-### 自己做固件
+1. 网页上「系统管理 → 固件升级」，手动上传 `*-rogui-*.pkgtb`。
+2. 照「安装」第二步部署补丁包。固件版也离不开它：`rogui.sh` 要把 `rc_support` 里的 `rog` 补回去，不然页面背景是白的（见「原理」）。`rogui.sh status` 应显示「挂载: 不需要（固件自带 ROG 网页）」。
+3. 确认没问题后，删掉 `/jffs/rogui/overlay.tgz` 省出 jffs，固件版用不到它。
 
-做固件要在 Linux 上用 root 跑，因为解包和重新打包时要原样保留属主和设备文件，macOS 做不到；还要装 `squashfs-tools`。没有 Linux 可以用 Docker 或 GitHub Actions。
+### 升级到新版本
 
-1. 照「安装」第一步打好补丁包。
-2. 做固件，三选一：
-   - Linux：`sudo rogui/bake.sh <KoolCenter 固件.pkgtb> rogui/dist/rogui-<版本>.tgz`
-   - macOS 装了 Docker：`rogui/bake-docker.sh <KoolCenter 固件.pkgtb> rogui/dist/rogui-<版本>.tgz`。两个文件都要在仓库目录里，因为容器只挂载仓库目录。
-   - GitHub Actions：fork 本仓库，先在 fork 的 Actions 页面点一次启用（GitHub 对 fork 默认不跑 workflow），装好并登录 `gh`，在 fork 里跑 `rogui/ci.sh run <KoolCenter 固件.pkgtb> [原厂固件.zip]`。它把两个固件传到草稿 Release「inputs」，触发 `bake` workflow，产物放进 Release「rogui-<KoolCenter 版本>-<日期>」，再下载到 `rogui/dist/ci-<编号>/`。这两个 Release 默认都是草稿，只有你自己看得到；加 `--public`（或者设仓库变量 `ROGUI_RELEASE=public`）产物才会公开。公开就等于分发华硕和 KoolCenter 的固件，要不要这样做你自己决定。
+刷机时正在运行的那套固件不能动，新固件只能放进剩下的空间，固件版又比原版大约 8MB（见「原理」）。所以：
 
-   产物是 `*-rogui-*.pkgtb`。对比没通过时不会产出固件：Linux 和 Docker 的报告在 `rogui/dist/failed/`，GitHub Actions 的报告在那次 workflow 运行的摘要页上。
-3. 网页上「系统管理 → 固件升级」，手动上传这个 `.pkgtb`。
-4. 照「安装」第二步部署补丁包。`rogui.sh` 会认出固件自带 ROG 网页，不挂载，只补 `rc_support` 里的 `rog`。`rogui.sh status` 应显示「挂载: 不需要（固件自带 ROG 网页）」。刷完到部署之前，页面背景可能是白的，部署后就好（原因见「原理」）。确认没问题后，可以删掉 `/jffs/rogui/overlay.tgz` 省出 jffs。
-5. 撤回：刷 KoolCenter 原版固件。之后想用挂载版，照「安装」第二步重新部署一次补丁包。
+- 从固件版升级到下一版固件版，**要刷两次**：先刷新版的 KoolCenter 原版固件，开机后（界面暂时是蓝色）再刷新的固件版。不要直接刷，两个固件版放不下。
+- 空间每一版都在变紧，102.9_0 这样刷完只剩约 1.3MB。以后的版本放不下时，就只能刷原版、改用挂载版。
 
-   刷坏了进不了系统：用华硕的救援模式（拔电，按住 reset 再插电）刷原版固件，见[华硕的说明](https://www.asus.com/support/FAQ/1000814)。
+### 撤回
+
+刷 KoolCenter 原版固件。想继续用 ROG 界面，再部署一次补丁包，就是挂载版了。
+
+刷坏了进不了系统：用华硕的救援模式（拔电，按住 reset 再插电）刷原版固件，见[华硕的说明](https://www.asus.com/support/FAQ/1000814)。
 
 ## 出问题怎么办
 
@@ -110,7 +108,7 @@ sh /jffs/rogui/rogui.sh uninstall   # 去掉开机自启和钩子，并停用
 
 | 现象 | 原因 | 怎么办 |
 |---|---|---|
-| 界面变回蓝色 | 固件和补丁包不配套，多半是升级了固件还没重新打包。rogui 发现不配套就跳过，所以不会坏 | 按「安装」两步重做 |
+| 界面变回蓝色 | 固件和补丁包不配套，多半是升级了固件还没换补丁包。rogui 发现不配套就跳过，所以不会坏 | 按「安装」两步重做 |
 | 所有页面背景变白，横幅变成带「退出/重新启动」按钮的华硕版 | 固件重写了 `rc_support`，丢了 `rog`（见「原理」），钩子没补回 | `sh /jffs/rogui/rogui.sh ensure` 马上补回；`status` 说没有钩子时，再跑一次 `install` |
 | 软件中心里有的老插件不是 ROG 样式 | aliddns、cfddns、frpc、fastd1ck、qiandao、pushplus、routerhook、serverchan 这 8 个插件，安装时判定不是 ROG 皮肤，会把自己的 ROG 样式删掉 | 启用 rogui 之后重装这个插件 |
 
@@ -129,13 +127,12 @@ sh /jffs/rogui/rogui.sh uninstall   # 去掉开机自启和钩子，并停用
 
 - `rogui/sqfs.py` 是纯 Python 的 squashfs 读取器，直接从两个固件文件里拆出 `/www`，结果和从路由器上拉下来的逐字节相同。
 - `rogui/build.py` 负责合并：
-  - 只打包和 KoolCenter 不一样的文件；
-  - 搬过来的 Merlin 页面要按字典重新映射 `<#N#>` 编号，因为两边字典的行号不同，不映射的话文字全会错位；
-  - 把 Merlin 页面和软件中心补进菜单，软件中心的接入照搬 KoolCenter 给 GT-BE96 做的 ROG 官改；
-  - 补上 Merlin 页面要用、原厂 js 里没有的函数，去掉指向不存在页面的菜单项。
-- `rogui/check.py` 做静态检查，只报告合并后才出现的问题：断链、后端缺的函数、后端不处理的 `.cgi`、字典编号越界。
+  - 只打包和 KoolCenter 不一样的文件。
+  - 把 Merlin 页面和软件中心补进菜单，软件中心的接入照搬 KoolCenter 给 GT-BE96 做的 ROG 官改。
+  - 搬过来的 Merlin 页面按字典重新映射 `<#N#>` 编号：两边字典的行号不同，不映射的话文字会全部错位。
+- `rogui/check.py` 做静态检查，只报告合并后才出现的问题，例如断链、后端缺的函数。
 
-仓库的代码里不放补丁包：包里是华硕原厂的网页文件，而且只对一版固件有效，所以由脚本从固件文件现拼。Releases 里的固件和补丁包，是 CI 用同一套脚本拼出来的。
+仓库的代码里不放补丁包：包里是华硕原厂的网页文件，而且只对一版固件有效，所以由脚本从固件文件现拼。Releases 里的文件是 CI 用同一套脚本拼的。
 
 **挂载版。**
 
@@ -166,10 +163,8 @@ KoolCenter .pkgtb
 
 - 只换 `/www`，不从源码重新编译：KoolCenter 发布的是二进制，自己编出来的不可能和它逐字节相同，那就等于换了一个固件。只换 `/www`，才能逐项证明其他部分原封不动。
 - 能这样改，是因为 KoolCenter 和原厂的 `.pkgtb` 都没有签名，只有 sha256。`fwbake.py` 遇到带签名的包会直接拒绝。
-- `bake.sh` 做完会把新固件重新拆开，和原包逐项对比：`/www` 以外每个文件、目录、链接、设备文件的内容、权限、属主、修改时间都要相同；`/www` 要正好等于「原版 + 补丁包」；再用另一个读取器 `sqfs.py` 直接读新固件，也要得到同样的 `/www`。全部通过才产出固件。
-- 同一个补丁包总是打出逐字节相同的固件，所以结果可以复现、核对。CI 会自己重新打补丁包，包里文件的修改时间不同，所以 CI 做的固件和本地做的 sha256 不同，这是正常的。
-- 刷机时，新固件写进闪存里没在用的那一组 bootfs + rootfs，下次开机从新的一组启动。jffs、设置和插件在别的分区，不受影响。
-- `rc_support` 里的 `rog` 做不进固件（见上），所以固件版也要部署 `rogui.sh`。它看到 `/www` 没有挂载、配色却已经是 ROG 红，就知道是固件版，只补 `rog`。
+- `bake.sh` 做完会把新固件重新拆开，和原包逐项对比：`/www` 以外每一项都要和原包相同，`/www` 要正好等于「原版 + 补丁包」。全部通过才产出固件，同一个补丁包总是打出逐字节相同的固件。
+- 刷机时，新固件写进闪存里没在用的那一组 bootfs + rootfs，下次开机从新的一组启动；jffs、设置和插件在别的分区，不受影响。两组加上空闲一共约 161MB，正在用的那组不能动。合进来的网页让固件比原版大约 8MB，两个固件版加起来就放不下了，所以升级时要先换成原版。
 
 ## 开发
 
