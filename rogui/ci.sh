@@ -97,7 +97,12 @@ cmd_publish() {
 	[ -n "${kcver}" ] && [ -n "${date}" ] || die "看不懂产物文件名 ${name}，没法起 Release 名"
 
 	local tag="rogui-${kcver}-${date}"
-	release_exists "${tag}" && tag="${tag}-r${GITHUB_RUN_NUMBER}"
+	if release_exists "${tag}"; then
+		# 重跑同一次运行时编号不变，再带上第几次尝试
+		tag="${tag}-r${GITHUB_RUN_NUMBER}"
+		[ "${GITHUB_RUN_ATTEMPT:-1}" -gt 1 ] && tag="${tag}.${GITHUB_RUN_ATTEMPT}"
+		release_exists "${tag}" && die "Release「${tag}」已经存在，先在网页上删掉它再重跑"
+	fi
 	local title="rogui ${kcver}（重新打包 ${date:0:4}-${date:4:2}-${date:6:2}）"
 
 	# 产物目录是 sudo bake.sh 建的，属于 root，说明写到临时文件
@@ -136,7 +141,10 @@ cmd_publish() {
 	rid="$(gh api -X POST "repos/${REPO}/releases" -f tag_name="${tag}" -f target_commitish="${GITHUB_SHA}" \
 		-f name="${title}" -F draft=true -F body=@"${notes}" --jq .id)"
 	for f in "${dir}"/*.pkgtb "${dir}"/*.verify.txt "${dir}"/*.sha256 "$@"; do
-		[ -f "${f}" ] && upload "${rid}" "${f}" && echo "已上传 $(basename "${f}")"
+		[ -f "${f}" ] || continue
+		# 写在 && 链中间的命令失败时 set -e 不管，这里必须显式退出，免得把缺文件的 Release 公开
+		upload "${rid}" "${f}" || die "上传 $(basename "${f}") 失败，Release「${tag}」留在草稿，没有公开"
+		echo "已上传 $(basename "${f}")"
 	done
 
 	local url="${GITHUB_SERVER_URL:-https://github.com}/${REPO}/releases/tag/${tag}"
