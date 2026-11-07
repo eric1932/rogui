@@ -1,6 +1,6 @@
 # rogui：GT-BE98 Pro 刷 KoolCenter 梅林改版后换回原厂 ROG 界面
 
-> **English:** rogui brings ASUS's stock ROG web UI back to a GT-BE98 Pro running the KoolCenter build of Asuswrt-Merlin (3006.102). The Merlin pages (VPN Director, DNS Director, Tweaks, System Info…) and the KoolCenter Software Center keep working; only the web layer changes. The merged UI is built on your computer from two firmware files you download yourself. There are two ways to put it on the router: **overlay mode** (default) bind-mounts it over `/www` at boot and leaves the firmware untouched; **baked mode** (experimental) builds it into the KoolCenter firmware image, which you then flash, so almost nothing is kept in jffs. Docs are in Chinese.
+> **English:** rogui brings ASUS's stock ROG web UI back to a GT-BE98 Pro running the KoolCenter build of Asuswrt-Merlin (3006.102). The Merlin pages (VPN Director, DNS Director, Tweaks, System Info…) and the KoolCenter Software Center keep working; only the web layer changes. The merged UI is built on your computer from two firmware files you download yourself. There are two ways to put it on the router: **overlay mode** (default) bind-mounts it over `/www` at boot and leaves the firmware untouched; **baked mode** (experimental) builds it into the KoolCenter firmware image, which you then flash, so almost nothing is kept in jffs. Prebuilt baked firmware for some KoolCenter versions is on the [Releases](https://github.com/eric1932/rogui/releases) page. Docs are in Chinese.
 
 ![rogui 的两种方案：挂载版和固件版](docs/rogui-modes.svg)
 
@@ -27,7 +27,7 @@ KoolCenter 梅林改版（3006.102 分支）没有 ROG 皮肤，界面是普通�
 | 撤回 | `rogui.sh stop`，马上变回蓝色 | 刷回 KoolCenter 原版固件 |
 | 适合 | 先试试，要能随时撤 | 长期用，固件很少换 |
 
-拿不准就先用挂载版。固件版也要用挂载版的补丁包来做，以后随时可以换过去。固件版目前只在 KoolCenter 102.8_0 上实际刷过。
+拿不准就先用挂载版，以后随时可以换成固件版。固件版可以直接下载 [Releases](https://github.com/eric1932/rogui/releases) 里做好的固件，也可以自己做。目前只在 KoolCenter 102.8_0 上实际刷过。
 
 ## 需要
 
@@ -37,6 +37,8 @@ KoolCenter 梅林改版（3006.102 分支）没有 ROG 皮肤，界面是普通�
 - 仓库根目录下放两个固件文件：
   - 你刷的那版 KoolCenter 固件 `.pkgtb`；
   - 华硕官网 GT-BE98 Pro 支持页下载的原厂固件 `FW_GT-BE98_Pro_*.zip`，用来提取 ROG 网页。有多个时默认用文件名最新的那个。
+
+直接下载 Releases 里做好的固件的话，只需要前两条。
 
 ## 安装（挂载版）
 
@@ -74,13 +76,26 @@ sh /jffs/rogui/rogui.sh uninstall   # 去掉开机自启和钩子，并停用
 
 固件版把合好的网页直接做进 KoolCenter 固件：jffs 里只剩 `rogui.sh`，开机不用复制和挂载。代价是每换一版固件都要重做一次，撤回要刷回原版固件。为什么只动了网页、怎么证明的，见「原理」。
 
+### 直接下载做好的固件
+
+[Releases](https://github.com/eric1932/rogui/releases) 里每个 Release 对应一版 KoolCenter 固件，名字里写着版本，例如 `rogui-3006_102.8_0-20261107` 对应 KoolCenter 102.8_0。刷它等于换成那一版 KoolCenter，再加上 ROG 网页。这些固件是 GitHub Actions 按下面「自己做固件」的流程做的，逐项对比报告附在 Release 说明里；不是 KoolCenter 或华硕出品。
+
+1. 下载 `*-rogui-*.pkgtb`、同名的 `.sha256` 和补丁包 `rogui-*.tgz`，放在同一个目录，核对 sha256：`shasum -a 256 -c *.pkgtb.sha256`（Linux 用 `sha256sum -c`）。
+2. 网页上「系统管理 → 固件升级」，手动上传这个 `.pkgtb`。
+3. 部署补丁包：`cat rogui-<版本>.tgz | ssh admin@192.168.50.1 'tar xzf - -C /jffs && sh /jffs/rogui/rogui.sh install'`。固件版也离不开它：`rogui.sh` 要在开机后和每次服务事件后把 `rc_support` 里的 `rog` 补回去，不然页面背景是白的（见「原理」）。`rogui.sh status` 应显示「挂载: 不需要（固件自带 ROG 网页）」。
+4. 确认没问题后，可以删掉 `/jffs/rogui/overlay.tgz` 省出 jffs，固件版用不到它。
+
+撤回和救砖，见下面「自己做固件」的第 5 步。
+
+### 自己做固件
+
 做固件要在 Linux 上用 root 跑，因为解包和重新打包时要原样保留属主和设备文件，macOS 做不到；还要装 `squashfs-tools`。没有 Linux 可以用 Docker 或 GitHub Actions。
 
 1. 照「安装」第一步打好补丁包。
 2. 做固件，三选一：
    - Linux：`sudo rogui/bake.sh <KoolCenter 固件.pkgtb> rogui/dist/rogui-<版本>.tgz`
    - macOS 装了 Docker：`rogui/bake-docker.sh <KoolCenter 固件.pkgtb> rogui/dist/rogui-<版本>.tgz`。两个文件都要在仓库目录里，因为容器只挂载仓库目录。
-   - GitHub Actions：fork 本仓库，先在 fork 的 Actions 页面点一次启用（GitHub 对 fork 默认不跑 workflow），装好并登录 `gh`，在 fork 里跑 `rogui/ci.sh run <KoolCenter 固件.pkgtb> [原厂固件.zip]`。它把固件传到草稿 Release「inputs」，触发 `bake` workflow，跑完把产物下载到 `rogui/dist/ci-<编号>/`。草稿 Release 只有你自己看得到。**不要发布它**，发布就等于公开分发华硕和 KoolCenter 的固件。
+   - GitHub Actions：fork 本仓库，先在 fork 的 Actions 页面点一次启用（GitHub 对 fork 默认不跑 workflow），装好并登录 `gh`，在 fork 里跑 `rogui/ci.sh run <KoolCenter 固件.pkgtb> [原厂固件.zip]`。它把两个固件传到草稿 Release「inputs」，触发 `bake` workflow，产物放进 Release「rogui-<KoolCenter 版本>-<日期>」，再下载到 `rogui/dist/ci-<编号>/`。这两个 Release 默认都是草稿，只有你自己看得到；加 `--public`（或者设仓库变量 `ROGUI_RELEASE=public`）产物才会公开。公开就等于分发华硕和 KoolCenter 的固件，要不要这样做你自己决定。
 
    产物是 `*-rogui-*.pkgtb`。对比没通过时不会产出固件：Linux 和 Docker 的报告在 `rogui/dist/failed/`，GitHub Actions 的报告在那次 workflow 运行的摘要页上。
 3. 网页上「系统管理 → 固件升级」，手动上传这个 `.pkgtb`。
@@ -120,7 +135,7 @@ sh /jffs/rogui/rogui.sh uninstall   # 去掉开机自启和钩子，并停用
   - 补上 Merlin 页面要用、原厂 js 里没有的函数，去掉指向不存在页面的菜单项。
 - `rogui/check.py` 做静态检查，只报告合并后才出现的问题：断链、后端缺的函数、后端不处理的 `.cgi`、字典编号越界。
 
-仓库里不放打好的补丁包：包里是华硕原厂的网页文件，而且只对一版固件有效。
+仓库的代码里不放补丁包：包里是华硕原厂的网页文件，而且只对一版固件有效，所以由脚本从固件文件现拼。Releases 里的固件和补丁包，是 CI 用同一套脚本拼出来的。
 
 **挂载版。**
 
