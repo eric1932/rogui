@@ -1,0 +1,7 @@
+# 固件文件自己下载，不进库
+*.pkgtb
+*.zip
+# 打出来的补丁包
+rogui/dist/
+__pycache__/
+.DS_Store

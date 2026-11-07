@@ -1,0 +1,64 @@
+# 手动触发：把 rogui 的 ROG 网页做进 KoolCenter 固件，产出一个自带 ROG 网页的 .pkgtb。
+#
+# 固件文件不进仓库，也不放公开的 Actions artifact：先在电脑上跑 rogui/ci.sh run，它会把固件传到
+# 草稿 Release「inputs」（草稿只有对仓库有写权限的人看得到），再触发这里；产物也放进草稿 Release。
+# 日志是公开的，里面只有文件名、大小、校验值和检查结果。
+name: bake
+
+on:
+  workflow_dispatch:
+    inputs:
+      kc:
+        description: 草稿 Release「inputs」里 KoolCenter 固件的文件名（.pkgtb）
+        required: true
+      stock:
+        description: 同一个草稿里华硕原厂固件的文件名（FW_GT-BE98_Pro_*.zip）
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: bake
+
+jobs:
+  bake:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      KC: ${{ inputs.kc }}
+      STOCK: ${{ inputs.stock }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 装 squashfs-tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq squashfs-tools
+          mksquashfs -version | head -1
+
+      - name: 从草稿 Release 取固件
+        run: bash rogui/ci.sh fetch "$KC" "$STOCK" in
+
+      - name: 打补丁包（update.sh：拼补丁 + 静态检查）
+        run: bash rogui/update.sh "in/$KC" "in/$STOCK"
+
+      - name: 做进固件并逐项对比（bake.sh）
+        run: |
+          pkg="$(ls rogui/dist/rogui-*.tgz)"
+          sudo bash rogui/bake.sh "in/$KC" "$pkg" out
+
+      - name: 产物放进草稿 Release
+        run: bash rogui/ci.sh publish out rogui/dist/rogui-*.tgz rogui/dist/rogui-*.check.txt
+
+      - name: 摘要
+        if: always()
+        run: |
+          {
+            echo '### bake'
+            echo '```'
+            cat out/*.verify.txt rogui/dist/failed/*.txt out/failed/*.txt 2>/dev/null || echo '（没有报告）'
+            cat out/*.sha256 2>/dev/null || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

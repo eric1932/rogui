@@ -1,0 +1,27 @@
+{
+ "_说明": "rogui 的黄金标准。改了 build.py 等导致输出有意变化时，先人工核对差异，再更新这里的值。见 TESTING.md。",
+ "firmware": {
+  "GT-BE98_PRO_3006_102.8_0_nand_squashfs-20260710-0756872.pkgtb": {"www_fp": "45f16f79e73419a73fa14fbcc6775bee", "files": 1195, "links": 32},
+  "GT-BE98_PRO_3006_102.7_2_nand_squashfs-20260506-9ee7c55.pkgtb": {"www_fp": "2e1532a7460371999cb81dd82b8794f9", "files": 1195, "links": 32},
+  "FW_GT-BE98_Pro_300610239441.zip": {"www_fp": "9bad0bfba163211a73a83c3838e1bba8", "files": 1353, "links": 10},
+  "FW_GT-BE98_Pro_300610239386.zip": {"www_fp": "97ad8f38e3f691e820adb8d451e30e4e", "files": 1352, "links": 10}
+ },
+ "builds": [
+  {"kc": "GT-BE98_PRO_3006_102.8_0_nand_squashfs-20260710-0756872.pkgtb", "stock": "FW_GT-BE98_Pro_300610239441.zip",
+   "label": "3006_102.8_0-stock39441", "overlay_hash": "e5e99977d4e4e98d2b446a9959eb8eb9", "overlay_files": 645, "check": true},
+  {"kc": "GT-BE98_PRO_3006_102.7_2_nand_squashfs-20260506-9ee7c55.pkgtb", "stock": "FW_GT-BE98_Pro_300610239441.zip",
+   "label": "3006_102.7_2-stock39441", "overlay_hash": "23b0ae8d857a2d4c74dc2ed07efb7ced", "overlay_files": 657, "check": false},
+  {"kc": "GT-BE98_PRO_3006_102.8_0_nand_squashfs-20260710-0756872.pkgtb", "stock": "FW_GT-BE98_Pro_300610239386.zip",
+   "label": "3006_102.8_0-stock39386", "overlay_hash": "0de7a4eaed96036eabaec7e32f1a68c1", "overlay_files": 642, "check": false}
+ ],
+ "negative": [
+  {"name": "原厂 zip 当 --kc", "kc": "FW_GT-BE98_Pro_300610239441.zip", "stock": "FW_GT-BE98_Pro_300610239441.zip", "expect": "不像 KoolCenter 固件"},
+  {"name": "两个参数放反", "kc": "FW_GT-BE98_Pro_300610239441.zip", "stock": "GT-BE98_PRO_3006_102.8_0_nand_squashfs-20260710-0756872.pkgtb", "expect": "不像华硕原厂 ROG 固件"},
+  {"name": "KoolCenter 当 --stock", "kc": "GT-BE98_PRO_3006_102.8_0_nand_squashfs-20260710-0756872.pkgtb", "stock": "GT-BE98_PRO_3006_102.7_2_nand_squashfs-20260506-9ee7c55.pkgtb", "expect": "不像华硕原厂 ROG 固件"},
+  {"name": "文件不存在", "kc": "不存在.pkgtb", "stock": "FW_GT-BE98_Pro_300610239441.zip", "expect": "No such file"}
+ ],
+ "router": {
+  "_说明": "路由器上 102.8_0 + stock39441 补丁启用后，合成出的 /www 指纹（rogui.sh 的 www_fp 在挂载状态下算出的值）",
+  "merged_www_fp": "95c68d63bd22024cd1ae5fc86c29a010"
+ }
+}
