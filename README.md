@@ -2,6 +2,8 @@
 
 > **English:** rogui puts ASUS's stock ROG web UI back on a GT-BE98 Pro running the KoolCenter build of Asuswrt-Merlin (3006.102), while keeping the Merlin pages (VPN Director, DNS Director, Tweaks, Sysinfo…) and the KoolCenter Software Center. Only the web layer is replaced. The overlay is built on your computer from the two firmware files you already have. There are two ways to deliver it: **overlay mode** (default) bind-mounts it over `/www` at boot and leaves the firmware untouched; **baked mode** (experimental) bakes the merged web UI into the KoolCenter firmware image, so nothing is kept in jffs. Docs are in Chinese.
 
+![rogui 的两种方案：挂载版和固件版](docs/rogui-modes.svg)
+
 <!-- 截图：首页、软件中心、一个 Merlin 页面（如 VPN Director）。放到 docs/ 下再在这里引用 -->
 
 KoolCenter 梅林改版（3006.102 分支）没有 ROG 皮肤，界面是普通的蓝色华硕界面。rogui 在开机时把原厂 ROG 网页盖到 `/www` 上：
