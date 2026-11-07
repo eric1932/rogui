@@ -152,7 +152,7 @@ cmd_run() {
 	done
 	echo "== 产物已下载到 ${out}"
 	( cd "${out}" && shasum -a 256 -c ./*.pkgtb.sha256 )
-	sed -n '/全部通过\|有检查没通过/p' "${out}"/*.verify.txt
+	grep -hE '全部通过|有检查没通过' "${out}"/*.verify.txt
 }
 
 case "${1:-}" in
