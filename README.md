@@ -1,6 +1,6 @@
 # rogui：GT-BE98 Pro 刷 KoolCenter 梅林改版后换回原厂 ROG 界面
 
-> **English:** rogui puts ASUS's stock ROG web UI back on a GT-BE98 Pro running the KoolCenter build of Asuswrt-Merlin (3006.102), while keeping the Merlin pages (VPN Director, DNS Director, Tweaks, Sysinfo…) and the KoolCenter Software Center. Only the web layer is replaced, via a bind mount over `/www` at boot. The firmware itself is not modified. The overlay is built on your computer from the two firmware files you already have. Optionally (experimental), the merged web UI can be baked into the KoolCenter firmware image itself, so nothing is kept in jffs; see 进阶. Docs are in Chinese.
+> **English:** rogui puts ASUS's stock ROG web UI back on a GT-BE98 Pro running the KoolCenter build of Asuswrt-Merlin (3006.102), while keeping the Merlin pages (VPN Director, DNS Director, Tweaks, Sysinfo…) and the KoolCenter Software Center. Only the web layer is replaced. The overlay is built on your computer from the two firmware files you already have. There are two ways to deliver it: **overlay mode** (default) bind-mounts it over `/www` at boot and leaves the firmware untouched; **baked mode** (experimental) bakes the merged web UI into the KoolCenter firmware image, so nothing is kept in jffs. Docs are in Chinese.
 
 <!-- 截图：首页、软件中心、一个 Merlin 页面（如 VPN Director）。放到 docs/ 下再在这里引用 -->
 
@@ -9,7 +9,16 @@ KoolCenter 梅林改版（3006.102 分支）没有 ROG 皮肤，界面是普通�
 - 原厂有、KoolCenter 界面里没有的页面也回来了：Game Dashboard、游戏探测雷达、WiFi 雷达、WTFast、设备加速器；
 - 软件中心照常可用，皮肤自动切成 ROG 版。
 
-只换网页层：httpd、rc、软件中心后端都还是 KoolCenter 的，不刷机，也不改固件。界面出了问题，跑一条 `rogui.sh stop` 就回到原来的蓝色界面。想省下 jffs 的话，也可以把网页直接做进固件，见「进阶」。
+只换网页层：httpd、rc、软件中心后端都还是 KoolCenter 的。有两种方案，出来的网页完全一样：
+
+| | 挂载版（overlay，默认） | 固件版（baked，实验性） |
+|---|---|---|
+| 做法 | 开机时把补丁包盖到 `/www` 上，固件不动 | 把合好的网页做进 KoolCenter 固件，刷这个固件 |
+| jffs 占用 | 约 13MB | 不到 10KB |
+| 内存和开机时间 | 约 45MB，开机多约 2 秒 | 不额外占 |
+| 撤回 | `rogui.sh stop`，马上变回蓝色 | 刷回 KoolCenter 原版固件 |
+
+下面的「安装」「日常」讲的是挂载版，固件版见「固件版」一节。
 
 ## 需要
 
@@ -53,12 +62,12 @@ sh /jffs/rogui/rogui.sh uninstall   # 去掉开机自启和钩子，并停用
 - 补丁包只对**一版** KoolCenter 固件有效。路由器开机时会比对固件自带 `/www` 的指纹，对不上就跳过，保持蓝色界面。
 - 不要用网页上的「检查更新」或在线升级：KoolCenter 换进来的是原厂的检查脚本，会拿原厂版本号比对，可能引导你刷回原厂。升级请手动上传固件。
 - 不要导入原厂固件导出的 `.CFG` 配置文件：导入会绕过 httpd 的 nvram 白名单。
-- 占用：jffs 约 13MB，内存约 45MB，开机多约 2 秒。把网页做进固件的话，jffs 不到 10KB，内存和开机时间都不额外占（见「进阶」）。
+- 占用（挂载版）：jffs 约 13MB，内存约 45MB，开机多约 2 秒。固件版 jffs 不到 10KB，内存和开机时间都不额外占（见「固件版」）。
 - 软件中心里有 8 个老插件（aliddns、cfddns、frpc、fastd1ck、qiandao、pushplus、routerhook、serverchan），如果是在启用 rogui 之前装的，要重装才会有 ROG 样式。
 
-## 进阶：把 ROG 网页做进固件（可选，实验性）
+## 固件版：把 ROG 网页做进固件（可选，实验性）
 
-默认方式要在 jffs 里放 13MB 的补丁包，开机时再复制一份网页到内存。也可以把合成好的网页直接做进 KoolCenter 固件，刷一个自带 ROG 网页的固件：jffs 里只剩 `rogui.sh`（不到 10KB），开机不用复制和挂载。代价是每次换固件都要重新做一次，界面坏了要刷回原版固件才能撤。
+挂载版要在 jffs 里放 13MB 的补丁包，开机时再复制一份网页到内存。固件版把合成好的网页直接做进 KoolCenter 固件，刷一个自带 ROG 网页的固件：jffs 里只剩 `rogui.sh`（不到 10KB），开机不用复制和挂载。代价是每次换固件都要重新做一次，界面坏了要刷回原版固件才能撤。
 
 - 做法：只换固件根文件系统里的 `/www`，用和原包相同的参数重新打包 squashfs，再改 FIT 头里根文件系统那一段的大小和 sha256。KoolCenter 和原厂的 `.pkgtb` 都没有签名，只有 sha256。
 - `bake.sh` 会把产物重新拆开，和原包逐项对比：`/www` 以外每个文件、目录、链接、设备文件的内容、权限、属主、修改时间都要相同，`/www` 要正好等于「原版 + 补丁包」，用另一个读取器（`sqfs.py`）直接读新固件也要得到同样的 `/www`。全部通过才产出固件。同样的输入总是打出逐字节相同的固件。
