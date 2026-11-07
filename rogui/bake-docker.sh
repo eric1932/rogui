@@ -20,7 +20,9 @@ rel() {
 KC="$(rel "$1")"
 PKG="$(rel "$2")"
 
-docker run --rm -v "${PROJECT_DIR}:/w" -w /w -e SUDO_UID="$(id -u)" -e SUDO_GID="$(id -g)" ubuntu:24.04 bash -c '
+# 重新打包日期按这台电脑的时区算（容器里是 UTC）
+docker run --rm -v "${PROJECT_DIR}:/w" -w /w -e SUDO_UID="$(id -u)" -e SUDO_GID="$(id -g)" \
+	-e REPACK_DATE="${REPACK_DATE:-$(date +%Y%m%d)}" ubuntu:24.04 bash -c '
 	set -e
 	apt-get update -qq >/dev/null
 	DEBIAN_FRONTEND=noninteractive apt-get install -y -qq squashfs-tools python3 >/dev/null

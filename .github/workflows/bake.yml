@@ -1,8 +1,11 @@
 # 手动触发：把 rogui 的 ROG 网页做进 KoolCenter 固件，产出一个自带 ROG 网页的 .pkgtb。
 #
-# 固件文件不进仓库，也不放公开的 Actions artifact：先在电脑上跑 rogui/ci.sh run，它会把固件传到
-# 草稿 Release「inputs」（草稿只有对仓库有写权限的人看得到），再触发这里；产物也放进草稿 Release。
-# 日志是公开的，里面只有文件名、大小、校验值和检查结果。
+# 固件文件不进仓库：先在电脑上跑 rogui/ci.sh run，它把两个固件传到草稿 Release「inputs」（草稿只有对仓库有
+# 写权限的人看得到），再触发这里。产物放进 Release「rogui-<KoolCenter 版本>-<重新打包日期>」：
+# - 默认是草稿；
+# - 仓库变量 ROGUI_RELEASE=public，或者触发时选 public，才发布成公开 Release。公开 Release 谁都能下载，
+#   等于公开分发华硕和 KoolCenter 的固件，要不要这样做自己决定。
+# 重新打包日期按仓库变量 ROGUI_TZ 的时区算（例如 America/Los_Angeles），没设就用 UTC。
 name: bake
 
 on:
@@ -14,6 +17,11 @@ on:
       stock:
         description: 同一个草稿里华硕原厂固件的文件名（FW_GT-BE98_Pro_*.zip）
         required: true
+      release:
+        description: 产物发布成公开 Release 还是草稿。default 按仓库变量 ROGUI_RELEASE，没设就是草稿
+        type: choice
+        options: [default, draft, public]
+        default: default
 
 permissions:
   contents: write
@@ -29,14 +37,18 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       KC: ${{ inputs.kc }}
       STOCK: ${{ inputs.stock }}
+      ROGUI_RELEASE: ${{ (inputs.release != 'default' && inputs.release) || vars.ROGUI_RELEASE || 'draft' }}
+      ROGUI_TZ: ${{ vars.ROGUI_TZ || 'UTC' }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: 装 squashfs-tools
+      - name: 装 squashfs-tools，定重新打包日期
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq squashfs-tools
           mksquashfs -version | head -1
+          echo "REPACK_DATE=$(TZ="$ROGUI_TZ" date +%Y%m%d)" >> "$GITHUB_ENV"
+          echo "产物发布方式: $ROGUI_RELEASE"
 
       - name: 从草稿 Release 取固件
         run: bash rogui/ci.sh fetch "$KC" "$STOCK" in
@@ -47,9 +59,9 @@ jobs:
       - name: 做进固件并逐项对比（bake.sh）
         run: |
           pkg="$(ls rogui/dist/rogui-*.tgz)"
-          sudo bash rogui/bake.sh "in/$KC" "$pkg" out
+          sudo REPACK_DATE="$REPACK_DATE" bash rogui/bake.sh "in/$KC" "$pkg" out
 
-      - name: 产物放进草稿 Release
+      - name: 产物放进 Release
         run: bash rogui/ci.sh publish out rogui/dist/rogui-*.tgz rogui/dist/rogui-*.check.txt
 
       - name: 摘要

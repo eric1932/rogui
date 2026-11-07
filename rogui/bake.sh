@@ -7,6 +7,9 @@
 # 用法:
 #   sudo rogui/bake.sh <KoolCenter 固件.pkgtb> <rogui 补丁包.tgz> [输出目录，默认 rogui/dist]
 #
+# 产物名 = KoolCenter 原文件名 + -rogui-<重新打包日期>-stock<原厂版本>.pkgtb，原版本信息原样保留。
+# 日期默认取今天，可以用环境变量 REPACK_DATE=YYYYMMDD 指定（sudo 时写成 sudo REPACK_DATE=… bash rogui/bake.sh …）。
+#
 # 做法：拆出根文件系统，原样解开；把 overlay 解到 /www 上（和 rogui.sh start 的合成方式一样）；
 # 用和原包相同的参数重新打包；只改 FIT 头里根文件系统的大小和 sha256。最后把产物重新拆开，
 # 和原包逐项对比（fwbake.py verify），全部通过才保留产物。
@@ -18,7 +21,9 @@ die() { echo "❌ $*" >&2; exit 1; }
 KC="${1:-}"
 PKG="${2:-}"
 OUTDIR="${3:-${SCRIPT_DIR}/dist}"
-[ -n "${KC}" ] && [ -n "${PKG}" ] || { sed -n '2,13p' "$0"; exit 1; }
+[ -n "${KC}" ] && [ -n "${PKG}" ] || { sed -n '2,16p' "$0"; exit 1; }
+REPACK_DATE="${REPACK_DATE:-$(date +%Y%m%d)}"
+case "${REPACK_DATE}" in [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]) ;; *) die "REPACK_DATE 要是 8 位日期，例如 20261107" ;; esac
 [ -f "${KC}" ] || die "文件不存在: ${KC}"
 [ -f "${PKG}" ] || die "文件不存在: ${PKG}"
 [ "$(uname -s)" = Linux ] || die "只能在 Linux 上跑；macOS 用 rogui/bake-docker.sh"
@@ -29,7 +34,7 @@ done
 
 W="$(mktemp -d)"
 trap 'rm -rf "${W}"' EXIT
-NAME="$(basename "${KC}" .pkgtb)-$(basename "${PKG}" .tgz | sed 's/^rogui-[^-]*-/rogui-/')"
+NAME="$(basename "${KC}" .pkgtb)-rogui-${REPACK_DATE}-$(basename "${PKG}" .tgz | sed 's/^rogui-[^-]*-//')"
 mkdir -p "${OUTDIR}"
 OUT="${OUTDIR}/${NAME}.pkgtb"
 REPORT="${OUTDIR}/${NAME}.verify.txt"
