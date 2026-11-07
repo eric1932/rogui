@@ -64,13 +64,25 @@ sh /jffs/rogui/rogui.sh uninstall   # 去掉开机自启和钩子，并停用
 - `bake.sh` 会把产物重新拆开，和原包逐项对比：`/www` 以外每个文件、目录、链接、设备文件的内容、权限、属主、修改时间都要相同，`/www` 要正好等于「原版 + 补丁包」，用另一个读取器（`sqfs.py`）直接读新固件也要得到同样的 `/www`。全部通过才产出固件。同样的输入总是打出逐字节相同的固件。
 - 新固件的根文件系统比原版大约 8MB（102.8_0：60MB → 68MB）。
 
+固件包的结构，以及做进固件时改了哪些地方：
+
+```
+KoolCenter .pkgtb
+├─ FIT 包头（964 字节）    记着每段的位置、大小、sha256       ← 只改 rootfs 段的大小和 sha256
+├─ bootfs 段（12.7MB）     ATF、U-Boot、内核、设备树           ← 一个字节不动
+└─ rootfs 段（squashfs）   /bin /lib /usr /rom …              ← /www 以外逐项相同
+                           /www                               ← 换成「原版 + 补丁包」，整个 squashfs 用原参数重打
+```
+
+刷机时新固件写进路由器闪存里没在用的那个号位（每个号位是一组 bootfs + rootfs），jffs、设置和插件都不动。
+
 步骤：
 
 1. 照「安装」第一步打好补丁包。
 2. 做固件，三选一：
    - Linux：`sudo rogui/bake.sh <KoolCenter 固件.pkgtb> rogui/dist/rogui-<版本>.tgz`
    - macOS 装了 Docker：`rogui/bake-docker.sh <KoolCenter 固件.pkgtb> rogui/dist/rogui-<版本>.tgz`（两个文件都要在仓库目录里）
-   - GitHub Actions：fork 本仓库，在 fork 里跑 `rogui/ci.sh run <KoolCenter 固件.pkgtb> [原厂固件.zip]`。它把固件传到草稿 Release「inputs」，触发 `bake` workflow，等跑完把产物下载到 `rogui/dist/ci-<编号>/`。草稿 Release 只有你自己看得到；**不要发布它**，发布就等于公开分发固件。
+   - GitHub Actions：fork 本仓库，在 fork 里跑 `rogui/ci.sh run <KoolCenter 固件.pkgtb> [原厂固件.zip]`。它把固件传到草稿 Release「inputs」，触发 `bake` workflow，等跑完把产物下载到 `rogui/dist/ci-<编号>/`。草稿 Release 只有你自己看得到；**不要发布它**，发布就等于公开分发固件。CI 会重新打一个补丁包，里面文件的修改时间是打包那一刻，所以它做出的固件和你本地做的 sha256 不同，这是正常的。想核对的话，拿 CI 的补丁包在本地再做一次固件，sha256 应该和 CI 的相同。
 3. 网页上「系统管理 → 固件升级」，手动上传产出的 `*-rogui-*.pkgtb`。
 4. 刷好后照「安装」第二步再部署一次补丁包。`rogui.sh` 会认出固件自带 ROG 网页：不挂载，只补 `rc_support` 里的 `rog`，服务事件钩子照常。`rogui.sh status` 应显示「挂载: 不需要（固件自带 ROG 网页）」。确认没问题后可以删掉 `/jffs/rogui/overlay.tgz`。
 5. 要回到蓝色界面：刷 KoolCenter 原版固件。刷坏了进不了系统：用华硕的救援模式（拔电，按住 reset 再插电）刷原版固件。
