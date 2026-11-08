@@ -38,16 +38,17 @@ SQFS_FLAGS = ['UNCOMPRESSED_INODES', 'UNCOMPRESSED_DATA', 'CHECK', 'UNCOMPRESSED
               'COMPRESSOR_OPTIONS', 'UNCOMPRESSED_IDS']
 SQFS_COMP = {1: 'gzip', 2: 'lzma', 3: 'lzo', 4: 'xz', 5: 'lz4', 6: 'zstd'}
 
-# 刷进路由器占多少 UBI 块（报告 10，GT-BE98 Pro 实测）：刷机库给每段建卷，块数 = ceil(字节 / 126976) + 9。
+# 刷进路由器占多少 UBI 块（notes/ubi-space.md，GT-BE98 Pro 实测）：刷机库给每段建卷，
+# 块数 = ceil((字节 + 1MiB) / 126976)，四个卷都对得上。
 # 两个号位加空闲一共 1332 块，刷机写的是备用号位，所以"正在跑的 + 新的 ≤ 1332"。
 # 每个固件不超过一半，从固件版升级到固件版才能一次刷完。别的机器可以用环境变量 ROGUI_UBI_POOL 改总数
 UBI_LEB = 126976
-UBI_EXTRA = 9
+UBI_SLACK = 1048576
 UBI_POOL = int(os.environ.get('ROGUI_UBI_POOL', '1332'))
 
 
 def ubi_blocks(sizes):
-    return sum(-(-s // UBI_LEB) + UBI_EXTRA for s in sizes)
+    return sum(-(-(s + UBI_SLACK) // UBI_LEB) for s in sizes)
 
 
 def ubi_report(orig_sizes, new_sizes):
