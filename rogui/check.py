@@ -8,8 +8,10 @@
 （可以从路由器只读拉取：ssh admin@192.168.50.1 'cat /usr/sbin/httpd' > httpd）。
 有需要人工判断的问题时退出码为 1。
 
+合成后的 /www = KoolCenter 原版 + overlay − 补丁包 remove.txt 里的文件（build.py --slim 删掉的）。
+
 检查项（都只报告"原厂或 KoolCenter 单独运行时没有、合并后才出现"的问题）:
-  1. 引用了不存在的文件（会 404）
+  1. 引用了不存在的文件（会 404）。指向精简时故意删掉的文件的，单独列出，不算问题
   2. 原厂页面调用了 KoolCenter httpd 里没有的 <% 函数 %>（输出为空；不在引号里时会变成 JS 语法错误）
   3. 原厂页面请求了 KoolCenter httpd 不处理的 .cgi
   4. 字典编号超出字典行数
@@ -50,6 +52,23 @@ def load_overlay(pkg):
             if m.isfile():
                 out[m.name] = t.extractfile(m).read()
     return out
+
+
+def load_remove(pkg):
+    """补丁包里的删除清单；旧包没有这个文件，就是空的。"""
+    with tarfile.open(pkg) as t:
+        try:
+            data = t.extractfile('rogui/remove.txt').read()
+        except KeyError:
+            return set()
+    return {l for l in data.decode('utf-8').split('\n') if l}
+
+
+def ref_targets(path, r):
+    """引用 r（出现在 path 里）可能指向的文件，和 refs() 的候选算法一致。"""
+    if r.startswith('/'):
+        return [os.path.normpath(r.lstrip('/'))]
+    return [os.path.normpath(os.path.join(os.path.dirname(path), r)), os.path.normpath(r)]
 
 
 def refs(path, text):
@@ -113,8 +132,12 @@ def main():
     st, st_links = build.load_tree(args.stock)
     kc, kc_links = build.load_tree(args.kc)
     ov = load_overlay(args.pkg)
+    removed = load_remove(args.pkg)
     merged = dict(kc)
     merged.update(ov)
+    for n in removed:
+        merged.pop(n, None)
+    kc_links_merged = {n: v for n, v in kc_links.items() if n not in removed}
     origin = {n: ('stock' if (n in st and merged[n] == st[n]) or (n in ov and n in st and not build.prefer_kc(n)) else 'kc') for n in merged}
     if args.httpd:
         with open(args.httpd, 'rb') as f:
@@ -130,11 +153,17 @@ def main():
     problems = 0
 
     # 1. 断链
-    new = missing_refs(merged, kc_links) - missing_refs(st, st_links) - missing_refs(kc, kc_links)
+    new = missing_refs(merged, kc_links_merged) - missing_refs(st, st_links) - missing_refs(kc, kc_links)
+    slimmed = {(p, r) for p, r in new if any(c in removed for c in ref_targets(p, r))}
+    new -= slimmed
     print('== 1. 合并后新出现的断链（%d 处）' % len(new))
     for path, r in sorted(new):
         print('   %s -> %s' % (path, r))
     problems += len(new)
+    if removed:
+        print('== 1b. 指向精简时故意删掉的文件（%d 处，删除清单 %d 项；预期如此，不算问题）' % (len(slimmed), len(removed)))
+        for path, r in sorted(slimmed):
+            print('   %s -> %s' % (path, r))
 
     # 2/3. 原厂来源的页面调用 KoolCenter httpd 没有的函数 / cgi
     # KoolCenter 自己的页面也这样用的，不算合并引入的问题

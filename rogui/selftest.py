@@ -8,6 +8,7 @@
 缺少的固件文件会跳过并提示，不算失败。全部通过退出码 0，否则 1。
 """
 import argparse
+import hashlib
 import importlib.util
 import io
 import json
@@ -38,15 +39,18 @@ def report(ok, what, detail=''):
 
 
 def overlay_hash(pkg):
+    """返回 (overlay 内容哈希, overlay 文件数, built_for, 删除清单项数, 删除清单 md5)。"""
     with tarfile.open(pkg) as t:
         ov = t.extractfile('rogui/overlay.tgz').read()
         built_for = t.extractfile('rogui/built_for').read().decode().strip()
+        remove = t.extractfile('rogui/remove.txt').read()
     files = {}
     with tarfile.open(fileobj=io.BytesIO(ov)) as t:
         for m in t.getmembers():
             if m.isfile():
                 files[m.name] = t.extractfile(m).read()
-    return fx.fingerprint(files, {}), len(files), built_for
+    n_rm = len([l for l in remove.split(b'\n') if l])
+    return fx.fingerprint(files, {}), len(files), built_for, n_rm, hashlib.md5(remove).hexdigest()
 
 
 def run(args):
@@ -78,15 +82,19 @@ def main():
                 report(None, what, '缺固件文件，跳过')
                 continue
             out = os.path.join(tmp, what)
-            r = run([os.path.join(HERE, 'build.py'), '--stock', fw(b['stock']), '--kc', fw(b['kc']), '--out', out])
+            r = run([os.path.join(HERE, 'build.py'), '--stock', fw(b['stock']), '--kc', fw(b['kc']), '--out', out]
+                    + b.get('args', []))
             pkg = os.path.join(out, 'rogui-%s.tgz' % b['label'])
             if r.returncode != 0 or not os.path.exists(pkg):
                 report(False, what, 'build 失败: ' + (r.stderr.strip() or r.stdout.strip())[-200:])
                 continue
-            h, n, built_for = overlay_hash(pkg)
+            h, n, built_for, n_rm, h_rm = overlay_hash(pkg)
             want_fp = golden['firmware'][b['kc']]['www_fp']
-            ok = (h, n, built_for) == (b['overlay_hash'], b['overlay_files'], want_fp)
-            report(ok, what, '' if ok else '实际 哈希=%s 文件=%d 配套=%s' % (h, n, built_for))
+            got = (h, n, built_for, n_rm, h_rm)
+            want = (b['overlay_hash'], b['overlay_files'], want_fp, b.get('remove_files', 0),
+                    b.get('remove_hash', 'd41d8cd98f00b204e9800998ecf8427e'))  # 空清单的 md5
+            ok = got == want
+            report(ok, what, '' if ok else '实际 哈希=%s 文件=%d 配套=%s 删除清单=%d 项 %s' % got)
             if b.get('check'):
                 c = run([os.path.join(HERE, 'check.py'), '--stock', fw(b['stock']), '--kc', fw(b['kc']), '--pkg', pkg])
                 report(c.returncode == 0, what + ' 静态检查', c.stdout.strip().splitlines()[-1] if c.stdout.strip() else c.stderr.strip()[-200:])
@@ -94,7 +102,8 @@ def main():
         print('== 3. 反例（必须报错，且不能产出补丁包）')
         for neg in golden['negative']:
             out = os.path.join(tmp, 'neg')
-            r = run([os.path.join(HERE, 'build.py'), '--stock', fw(neg['stock']), '--kc', fw(neg['kc']), '--out', out])
+            r = run([os.path.join(HERE, 'build.py'), '--stock', fw(neg['stock']), '--kc', fw(neg['kc']), '--out', out]
+                    + neg.get('args', []))
             msg = (r.stderr + r.stdout)
             produced = os.path.isdir(out) and any(n.endswith('.tgz') for n in os.listdir(out))
             ok = r.returncode != 0 and neg['expect'] in msg and not produced

@@ -3,7 +3,8 @@
 #
 #   rogui.sh install  挂好开机自启和服务事件钩子（可重复执行），然后 start
 #   rogui.sh uninstall 去掉开机自启和钩子，然后 stop
-#   rogui.sh start    把 KoolCenter 的 /www 复制到内存，盖上 overlay.tgz，再 bind mount 到 /www
+#   rogui.sh start    把 KoolCenter 的 /www 复制到内存，盖上 overlay.tgz，删掉 remove.txt 里列的文件，
+#                     再 bind mount 到 /www
 #   rogui.sh stop     撤掉挂载，回到 KoolCenter 原界面
 #   rogui.sh ensure   挂载状态下补回被固件重置的 rc_support rog（service-event-end 自动调用）
 #   rogui.sh status   看当前状态
@@ -143,6 +144,13 @@ do_start() {
 	mkdir -p "$WORK/www" || return 1
 	cp -a /www/. "$WORK/www/" || { log "复制 /www 失败"; rm -rf "$WORK"; return 1; }
 	tar xzf "$DIR/overlay.tgz" -C "$WORK/www" || { log "解压 overlay.tgz 失败"; rm -rf "$WORK"; return 1; }
+	# 精简（build.py --slim）：补丁包的 remove.txt 里列的文件不要，一行一个，相对 /www
+	if [ -s "$DIR/remove.txt" ]; then
+		while IFS= read -r p; do
+			case "$p" in ''|/*|*..*) continue ;; esac
+			rm -f "$WORK/www/$p"
+		done < "$DIR/remove.txt"
+	fi
 
 	mount -o bind "$WORK/www" /www || { log "bind mount 失败"; rm -rf "$WORK"; return 1; }
 	echo "$fp" > $FP_CACHE
@@ -219,6 +227,7 @@ do_status() {
 		echo "固件自带 /www 的指纹: $(www_fp)"
 	else
 		echo "补丁包对应的 /www 指纹: $(cat "$DIR/built_for" 2>/dev/null)"
+		[ -s "$DIR/remove.txt" ] && echo "精简: 合成时删掉 $(wc -l < "$DIR/remove.txt" | tr -d ' ') 个文件"
 		mounted || echo "当前 /www 指纹: $(www_fp)"
 	fi
 	case " $(nvram get rc_support) " in

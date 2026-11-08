@@ -90,20 +90,23 @@ cmd_publish() {
 	pkg="$(ls "${dir}"/*.pkgtb 2>/dev/null | head -1)"
 	[ -n "${pkg}" ] || die "${dir} 里没有 .pkgtb"
 	name="$(basename "${pkg}" .pkgtb)"
-	# 文件名形如 GT-BE98_PRO_3006_102.8_0_nand_squashfs-20260710-0756872-rogui-20261107-stock39441
+	# 文件名形如 GT-BE98_PRO_3006_102.9_0_nand_squashfs-20261030-060bf34-rogui-20261107-stock39441-slim
+	#（精简过的补丁包做出来的，最后带 -slim）
 	kcver="$(printf '%s' "${name}" | sed -n 's/^.*_PRO_\(.*\)_nand_.*$/\1/p')"
 	date="$(printf '%s' "${name}" | sed -n 's/^.*-rogui-\([0-9]\{8\}\)-.*$/\1/p')"
-	stockver="$(printf '%s' "${name}" | sed -n 's/^.*-rogui-[0-9]\{8\}-stock\(.*\)$/\1/p')"
+	stockver="$(printf '%s' "${name}" | sed -n 's/^.*-rogui-[0-9]\{8\}-stock\([0-9]*\).*$/\1/p')"
 	[ -n "${kcver}" ] && [ -n "${date}" ] || die "看不懂产物文件名 ${name}，没法起 Release 名"
+	local slim=""
+	case "${name}" in *-slim|*-slim-*) slim="-slim" ;; esac
 
-	local tag="rogui-${kcver}-${date}"
+	local tag="rogui-${kcver}-${date}${slim}"
 	if release_exists "${tag}"; then
 		# 重跑同一次运行时编号不变，再带上第几次尝试
 		tag="${tag}-r${GITHUB_RUN_NUMBER}"
 		[ "${GITHUB_RUN_ATTEMPT:-1}" -gt 1 ] && tag="${tag}.${GITHUB_RUN_ATTEMPT}"
 		release_exists "${tag}" && die "Release「${tag}」已经存在，先在网页上删掉它再重跑"
 	fi
-	local title="rogui ${kcver}（重新打包 ${date:0:4}-${date:4:2}-${date:6:2}）"
+	local title="rogui ${kcver}${slim:+ 精简版}（重新打包 ${date:0:4}-${date:4:2}-${date:6:2}）"
 
 	# 产物目录是 sudo bake.sh 建的，属于 root，说明写到临时文件
 	local notes in_dir="${INPUT_DIR:-in}"
@@ -121,6 +124,20 @@ cmd_publish() {
 		elif [ -n "${stockver}" ]; then
 			echo "- ROG 网页来自原厂固件 102_${stockver}"
 		fi
+		# 精简了什么：从一起上传的补丁包的 manifest.json 里读
+		local f slim_note=""
+		for f in "$@"; do
+			case "${f}" in
+				*.tgz) slim_note="$(tar -xzOf "${f}" rogui/manifest.json 2>/dev/null | python3 -I -c '
+import json, sys
+m = json.load(sys.stdin)
+if m.get("slim"):
+    langs = m.get("keep_langs") or []
+    print("- 精简：删掉 %d 个用不到的文件（模块 %s）%s" % (m.get("removed", 0), ", ".join(m["slim"]),
+          "，语言只留 " + "、".join(langs) if langs else ""))' 2>/dev/null || true)" ;;
+			esac
+		done
+		if [ -n "${slim_note}" ]; then echo "${slim_note}"; fi
 		echo "- 重新打包：${date:0:4}-${date:4:2}-${date:6:2}，[workflow 第 ${GITHUB_RUN_NUMBER} 次运行](${run_url})，代码提交 \`${GITHUB_SHA:0:7}\`"
 		echo "- 怎么刷、刷完要部署 \`rogui.sh\`、怎么撤回：见仓库 README 的「固件版」"
 		echo "- 版权方对这里分发的文件有异议，请提 issue，会尽快撤下"

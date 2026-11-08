@@ -3,11 +3,15 @@
 
 用法:
   python3 -I build.py --stock <原厂固件> --kc <KoolCenter 固件> [--label 名字] [--out dist/]
+                      [--slim lang,unused,gundam,cpadv|none] [--langs EN,CN,TW]
 
 两个输入都可以是固件文件（.pkgtb，或华硕官网下载的 .zip），直接从里面拆 /www；
 也可以是以前在路由器上 `tar czf - /www` 打出来的 .tar.gz。
-输出 dist/rogui-<名字>.tgz，里面是 overlay.tgz + rogui.sh + built_for + manifest.json，
+输出 dist/rogui-<名字>.tgz，里面是 overlay.tgz + remove.txt + rogui.sh + built_for + manifest.json，
 解压到路由器 /jffs/rogui/ 后用 rogui.sh start|stop|status 控制。
+
+--slim 删掉合成后 /www 里用不到的文件，默认四个模块全开（见下面的 SLIM_* 和报告 10）。
+开了精简，包名后面会加 -slim；--slim none 关掉，输出和以前一样。
 
 路由器上的做法: 开机把 KoolCenter 自己的 /www 复制到 /tmp 当底板，
 解开 overlay.tgz 覆盖上去，再 mount --bind 到 /www。所以 overlay 里只放
@@ -78,6 +82,25 @@ EXTRA_CSS = b"""
 \tbackground-position: 0px 0px;
 }
 """
+
+# 精简（--slim）：合成后的 /www 里用不到的文件不要。固件版要小到两个号位各放得下一个（每个不超过 666 块），
+# 升级才能一次刷完（报告 10）。原厂才有的文件直接不放进补丁；KoolCenter 自带的写进补丁包的 remove.txt，
+# 合成时（rogui.sh start、bake.sh）删掉。每个模块都自带判断，不该删的会保留并在报告里说明。
+SLIM_MODULES = ('lang', 'unused', 'gundam', 'cpadv')
+SLIM_DEFAULT = SLIM_MODULES
+# lang：只留这几种语言的字典和分语言的图片，Lang_Hdr.txt（httpd 按它列语言菜单）也只留这几行
+KEEP_LANGS = ('EN', 'CN', 'TW')
+LANG_HDR = 'Lang_Hdr.txt'
+LANG_IMG = r'_(%s)\.(?:jpg|jpeg|png|gif|svg)$'
+# unused：全站没有任何地方引用的大图，再加上所有 .new 备份。名字还出现在页面或 httpd 里的保留
+UNUSED_FILES = ('images/New_ui/login_bg_20.png', 'images/New_ui/QIS_bg-black.png')
+# gundam：高达联名主题。gundam_bg.png 有两处会用到：
+# - 地区码 GD 或 CoBrand=1 的机器（state.js 的 isGundam）。这要到开机后读出厂 nvram 才知道，build 时查不了，
+#   高达联名版的机器要去掉这个模块；
+# - ROG 20 周年版（rc_support 里有 YEAR20，difference.css 的 .YEAR20-bg）。rc 里有 YEAR20 时自动保留
+GUNDAM_FILES = ('css/gundam.css', 'images/gundam_bg.png')
+# cpadv：高级强制门户。rc 里没编进 cp_advanced 时，rc_support 里不会有它，菜单也不显示这一页
+CPADV_FILES = ('Captive_Portal_Advanced.asp', 'Captive_Portal_Advanced_template.js')
 
 MODEL = 'GT-BE98_PRO'  # FIT 镜像根节点 description 里的机型名
 
@@ -373,6 +396,72 @@ def extract_function(js, name):
     return None
 
 
+def parse_slim(value):
+    """--slim 的值 → 模块元组。不写用默认；none 或空串表示不精简。"""
+    if value is None:
+        return SLIM_DEFAULT
+    names = [s.strip() for s in value.split(',') if s.strip()]
+    if names in ([], ['none']):
+        return ()
+    bad = [n for n in names if n not in SLIM_MODULES]
+    if bad:
+        die('未知的精简模块 %s，可选: %s，或 none' % (', '.join(bad), ', '.join(SLIM_MODULES)))
+    return tuple(n for n in SLIM_MODULES if n in names)
+
+
+def slim_plan(modules, langs, files, httpd, rc, report):
+    """files 是合成后的 /www（{路径: 内容}）。返回 (要删的路径集合, {要改写的路径: 新内容})。"""
+    drop, replace = set(), {}
+    corpus = b'\n'.join(d for n, d in files.items() if n.endswith(TEXT_EXT))
+    for m in modules:
+        if m == 'lang':
+            if 'EN' not in langs:
+                die('--langs 必须包含 EN：httpd 找不到别的语言字典时用 EN.dict')
+            codes = {n[:-5] for n in files if n.endswith('.dict') and '/' not in n}
+            gone = sorted(codes - set(langs))
+            if not gone:
+                report.append('精简 lang: 本来就只有 %s，不用删' % ', '.join(sorted(codes)))
+                continue
+            dicts = {c + '.dict' for c in gone}
+            img = re.compile(LANG_IMG % '|'.join(gone))
+            imgs = {n for n in files if img.search(n)}
+            drop |= dicts | imgs
+            if LANG_HDR in files:
+                keep = [l for l in files[LANG_HDR].split(b'\n')
+                        if not (l.startswith(b'LANG_') and l[5:7].decode('ascii', 'replace') in gone and l[7:8] == b'=')]
+                replace[LANG_HDR] = b'\n'.join(keep)
+            report.append('精简 lang: 语言只留 %s，删掉 %d 个字典、%d 张分语言的图' % (', '.join(langs), len(dicts), len(imgs)))
+        elif m == 'unused':
+            cands = sorted(set(UNUSED_FILES) | {n for n in files if n.endswith('.new')})
+            got, kept = [], []
+            for n in cands:
+                if n not in files:
+                    continue
+                base = os.path.basename(n).encode()
+                (kept if base in corpus or (httpd is not None and base in httpd) else got).append(n)
+            drop |= set(got)
+            report.append('精简 unused: 删掉 %d 个没人引用的文件' % len(got)
+                          + ('；%s 名字还被引用，保留' % ', '.join(kept) if kept else ''))
+        elif m == 'gundam':
+            if rc is not None and b'YEAR20' in rc:
+                report.append('精简 gundam: 这版固件的 rc 支持 ROG 20 周年版界面（YEAR20），背景图要用，保留')
+                continue
+            got = [n for n in GUNDAM_FILES if n in files]
+            drop |= set(got)
+            report.append('精简 gundam: 删掉高达联名主题 %d 个文件（高达联名版的机器别开这个模块）' % len(got))
+        elif m == 'cpadv':
+            if rc is None:
+                report.append('精简 cpadv: --kc 不是固件文件，查不了 rc 支不支持高级强制门户，保留')
+                continue
+            if b'cp_advanced' in rc:
+                report.append('精简 cpadv: 这版固件的 rc 支持高级强制门户，保留')
+                continue
+            got = [n for n in CPADV_FILES if n in files]
+            drop |= set(got)
+            report.append('精简 cpadv: rc 里没有 cp_advanced，删掉高级强制门户 %d 个文件' % len(got))
+    return drop, replace
+
+
 def default_label(kc_path, stock_path, fp):
     """包名 = KoolCenter 版本 + 原厂版本，例如 3006_102.8_0-stock39441。
     两个版本都要带上：同一版 KoolCenter 配不同的原厂网页，拼出来的补丁不一样。"""
@@ -390,7 +479,12 @@ def main():
     ap.add_argument('--icon', default=os.path.join(HERE, 'assets', 'softcenter_rog.png'),
                     help='软件中心菜单图标，默认用 GT-BE96 官改的 ROG 配色版本')
     ap.add_argument('--out', default=os.path.join(HERE, 'dist'))
+    ap.add_argument('--slim', help='精简模块，逗号分隔（%s），none 表示不精简；默认 %s'
+                    % (', '.join(SLIM_MODULES), ','.join(SLIM_DEFAULT)))
+    ap.add_argument('--langs', default=','.join(KEEP_LANGS), help='精简 lang 时留下的语言，默认 %(default)s')
     args = ap.parse_args()
+    modules = parse_slim(args.slim)
+    langs = tuple(s.strip().upper() for s in args.langs.split(',') if s.strip())
 
     # 输入核对：机型对不对、原厂和 KoolCenter 有没有放反或放错
     for path, what in ((args.stock, '--stock'), (args.kc, '--kc')):
@@ -448,10 +542,26 @@ def main():
         overlay[inc] = base + ('\n/* rogui: 从 KoolCenter 版补入，Merlin 页面要用 */\n' + '\n'.join(add) + '\n').encode('utf-8')
         report.append('%s: 补入 %s' % (inc, ', '.join(names)))
 
+    # 2c. 精简：在拼菜单之前定下来，菜单就不会指向删掉的页面
+    drop, replace = set(), {}
+    if modules:
+        view = dict(kc)
+        view.update(overlay)
+        view.update({n: st[n] for n in st if n.endswith('.dict') and '/' not in n})
+        httpd = rc = None
+        if fwextract.is_firmware(args.kc):
+            fs = fwextract.open_fs(args.kc)
+            httpd = fwextract.read_one(fs, '/usr/sbin/httpd')
+            rc = fwextract.read_one(fs, '/sbin/rc')
+        drop, replace = slim_plan(modules, langs, view, httpd, rc, report)
+        for n in drop:
+            overlay.pop(n, None)
+        overlay.update(replace)
+
     # 3. 菜单、state.js、样式、图标
     overlay['require/modules/menuTree.js'] = patch_menu(st['require/modules/menuTree.js'],
                                                         kc['require/modules/menuTree.js'], remap,
-                                                        set(st) | set(kc), report)
+                                                        (set(st) | set(kc)) - drop, report)
     overlay['state.js'] = patch_state(st['state.js'], kc['state.js'], remap, report)
     for n in BAND_OR_PAGES:
         if n in st and not prefer_kc(n):
@@ -465,7 +575,7 @@ def main():
         report.append('软件中心图标: 没找到 %s，沿用 KoolCenter 自带的' % args.icon)
 
     # 4. 字典（含新追加的行）
-    overlay.update(remap.dict_files())
+    overlay.update({n: d for n, d in remap.dict_files().items() if n not in drop})
     report.append('字典: 映射 %d 处编号，原厂字典里没有、追加了 %d 条' % (remap.used, remap.appended))
 
     # 5. 符号链接：底板是 KoolCenter 的 /www，链接沿用它的；这里只核对 res 在
@@ -474,7 +584,7 @@ def main():
 
     # 打包
     os.makedirs(args.out, exist_ok=True)
-    tag = args.label or default_label(args.kc, args.stock, kc_fp)
+    tag = args.label or (default_label(args.kc, args.stock, kc_fp) + ('-slim' if modules else ''))
     built_for = kc_fp + '\n'
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode='w:gz', compresslevel=9) as t:
@@ -494,6 +604,9 @@ def main():
         'kc_input': os.path.basename(args.kc),
         'overlay_files': len(overlay),
         'overlay_sha256': hashlib.sha256(overlay_tgz).hexdigest(),
+        'slim': list(modules),
+        'keep_langs': list(langs) if 'lang' in modules else [],
+        'removed': len(drop),
         'report': report,
     }
     pkg = os.path.join(args.out, 'rogui-%s.tgz' % tag)
@@ -505,6 +618,8 @@ def main():
             info.mode = mode
             t.addfile(info, io.BytesIO(data))
         add('overlay.tgz', overlay_tgz)
+        # 合成时要删掉的文件（相对 /www），一行一个。没开精简也写一个空的，免得旧包留下的清单被沿用
+        add('remove.txt', ''.join(n + '\n' for n in sorted(drop)).encode('utf-8'))
         with open(os.path.join(HERE, 'rogui.sh'), 'rb') as f:
             add('rogui.sh', f.read(), 0o755)
         add('built_for', built_for.encode())
@@ -512,7 +627,7 @@ def main():
 
     for line in report:
         print('  ' + line)
-    print('overlay.tgz %.1f MB, %d 个文件' % (len(overlay_tgz) / 1e6, len(overlay)))
+    print('overlay.tgz %.1f MB, %d 个文件；remove.txt %d 项' % (len(overlay_tgz) / 1e6, len(overlay), len(drop)))
     print('输出: %s' % pkg)
 
 

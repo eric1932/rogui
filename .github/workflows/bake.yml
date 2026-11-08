@@ -6,6 +6,8 @@
 # - 仓库变量 ROGUI_RELEASE=public，或者触发时选 public，才发布成公开 Release。公开 Release 谁都能下载，
 #   等于公开分发华硕和 KoolCenter 的固件，要不要这样做自己决定。
 # 重新打包日期按仓库变量 ROGUI_TZ 的时区算（例如 America/Los_Angeles），没设就用 UTC。
+# 精简（build.py --slim）：默认删掉用不到的文件，语言只留 EN、CN、TW。仓库变量 ROGUI_SLIM 改模块
+# （例如 lang,unused 或 none），ROGUI_LANGS 改留下的语言（例如 EN,CN,TW,DE）。
 name: bake
 
 on:
@@ -39,6 +41,8 @@ jobs:
       STOCK: ${{ inputs.stock }}
       ROGUI_RELEASE: ${{ (inputs.release != 'default' && inputs.release) || vars.ROGUI_RELEASE || 'draft' }}
       ROGUI_TZ: ${{ vars.ROGUI_TZ || 'UTC' }}
+      ROGUI_SLIM: ${{ vars.ROGUI_SLIM }}
+      ROGUI_LANGS: ${{ vars.ROGUI_LANGS }}
     steps:
       - uses: actions/checkout@v4
 

@@ -9,10 +9,12 @@
 #
 # 产物名 = KoolCenter 原文件名 + -rogui-<重新打包日期>-stock<原厂版本>.pkgtb，原版本信息原样保留。
 # 日期默认取今天，可以用环境变量 REPACK_DATE=YYYYMMDD 指定（sudo 时写成 sudo REPACK_DATE=… bash rogui/bake.sh …）。
+# 实验：ROGUI_SQFS_BLOCK=1048576 用 1MB 的 squashfs 块重新打包，能小约 50 个 UBI 块（notes/ubi-space.md）。
+# 这样不再是"只改了 /www"，也没在路由器上开机验证过；产物名后面加 -b<大小>，比如 -b1m。
 #
-# 做法：拆出根文件系统，原样解开；把 overlay 解到 /www 上（和 rogui.sh start 的合成方式一样）；
-# 用和原包相同的参数重新打包；只改 FIT 头里根文件系统的大小和 sha256。最后把产物重新拆开，
-# 和原包逐项对比（fwbake.py verify），全部通过才保留产物。
+# 做法：拆出根文件系统，原样解开；把 overlay 解到 /www 上，再删掉补丁包 remove.txt 里列的文件
+# （和 rogui.sh start 的合成方式一样）；用和原包相同的参数重新打包；只改 FIT 头里根文件系统的大小和 sha256。
+# 最后把产物重新拆开，和原包逐项对比（fwbake.py verify），全部通过才保留产物。
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
@@ -21,7 +23,7 @@ die() { echo "❌ $*" >&2; exit 1; }
 KC="${1:-}"
 PKG="${2:-}"
 OUTDIR="${3:-${SCRIPT_DIR}/dist}"
-[ -n "${KC}" ] && [ -n "${PKG}" ] || { sed -n '2,16p' "$0"; exit 1; }
+[ -n "${KC}" ] && [ -n "${PKG}" ] || { sed -n '2,18p' "$0"; exit 1; }
 REPACK_DATE="${REPACK_DATE:-$(date +%Y%m%d)}"
 case "${REPACK_DATE}" in [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]) ;; *) die "REPACK_DATE 要是 8 位日期，例如 20261107" ;; esac
 [ -f "${KC}" ] || die "文件不存在: ${KC}"
@@ -35,6 +37,11 @@ done
 W="$(mktemp -d)"
 trap 'rm -rf "${W}"' EXIT
 NAME="$(basename "${KC}" .pkgtb)-rogui-${REPACK_DATE}-$(basename "${PKG}" .tgz | sed 's/^rogui-[^-]*-//')"
+BLOCK="${ROGUI_SQFS_BLOCK:-}"
+if [ -n "${BLOCK}" ]; then
+	case "${BLOCK}" in 4096|8192|16384|32768|65536|131072|262144|524288|1048576) ;; *) die "ROGUI_SQFS_BLOCK 要是 4K 到 1M 之间 2 的幂（字节数），例如 1048576" ;; esac
+	if [ "${BLOCK}" -ge 1048576 ]; then NAME="${NAME}-b$((BLOCK / 1048576))m"; else NAME="${NAME}-b$((BLOCK / 1024))k"; fi
+fi
 mkdir -p "${OUTDIR}"
 OUT="${OUTDIR}/${NAME}.pkgtb"
 REPORT="${OUTDIR}/${NAME}.verify.txt"
@@ -55,13 +62,25 @@ echo "== 2/5 原样解开"
 unsquashfs -no-progress -d "${W}/A" "${W}/orig/rootfs.sqfs" > /dev/null
 [ -f "${W}/A/www/state.js" ] || die "根文件系统里没有 /www/state.js，不像华硕固件"
 
-echo "== 3/5 合成 /www（原版 + overlay）"
+echo "== 3/5 合成 /www（原版 + overlay − 删除清单）"
 mkdir -p "${W}/pkg"
 tar -xzf "${PKG}" -C "${W}/pkg" rogui/overlay.tgz rogui/built_for
+# 删除清单是精简（build.py --slim）加的，旧补丁包没有
+tar -xzf "${PKG}" -C "${W}/pkg" rogui/remove.txt 2>/dev/null || : > "${W}/pkg/rogui/remove.txt"
 FP="$(python3 -I "${SCRIPT_DIR}/fwbake.py" fp "${W}/A/www")"
 [ "${FP}" = "$(cat "${W}/pkg/rogui/built_for")" ] || die "补丁包是给 /www 指纹 $(cat "${W}/pkg/rogui/built_for") 的固件做的，这个固件是 ${FP}，先用 update.sh 为这版固件重新打补丁包"
 cp -a "${W}/A" "${W}/C"
 tar -xzf "${W}/pkg/rogui/overlay.tgz" -C "${W}/C/www"
+N_RM=0
+while IFS= read -r p; do
+	case "${p}" in
+		'') continue ;;
+		/*|*..*) die "remove.txt 里有不安全的路径: ${p}" ;;
+	esac
+	rm -f "${W}/C/www/${p}"
+	N_RM=$((N_RM + 1))
+done < "${W}/pkg/rogui/remove.txt"
+[ "${N_RM}" = 0 ] || echo "   按删除清单删掉 ${N_RM} 项"
 # 解压时新建或改动过的目录，修改时间会变成"现在"。统一改成原包的打包时间，同样的输入就总能打出
 # 逐字节相同的固件（本地和 GitHub 上打的可以互相核对）。文件的时间来自补丁包，本来就固定。
 find "${W}/C/www" -type d -newermt "@${MKFS}" -exec touch -h -d "@${MKFS}" {} +
@@ -69,7 +88,8 @@ find "${W}/C/www" -type d -newermt "@${MKFS}" -exec touch -h -d "@${MKFS}" {} +
 echo "== 4/5 按原参数重新打包，写回固件"
 # 不加 -no-xattrs：原包没有 xattr 但也没设 NO_XATTRS 标记；解开的目录里没有 xattr 时，打出来的包和原包一样。
 # 万一目录里混进了 xattr，verify 会因为 has_xattrs 不同而报错。
-ARGS=(-comp "${COMP}" -b "${BS}" -noappend -no-progress -quiet -mkfs-time "${MKFS}")
+[ -z "${BLOCK}" ] || [ "${BLOCK}" = "${BS}" ] || echo "   ⚠️  实验：squashfs 块从 ${BS} 改成 ${BLOCK}"
+ARGS=(-comp "${COMP}" -b "${BLOCK:-${BS}}" -noappend -no-progress -quiet -mkfs-time "${MKFS}")
 [ "${EXPORT}" = 1 ] || ARGS+=(-no-exports)
 mksquashfs "${W}/C" "${W}/new.sqfs" "${ARGS[@]}"
 python3 -I "${SCRIPT_DIR}/fwbake.py" pack "${KC}" "${W}/new.sqfs" "${W}/out.pkgtb" | sed 's/^/   /'
@@ -78,7 +98,7 @@ echo "== 5/5 把产物重新拆开，逐项对比"
 python3 -I "${SCRIPT_DIR}/fwbake.py" split "${W}/out.pkgtb" "${W}/back" > /dev/null
 unsquashfs -no-progress -d "${W}/B" "${W}/back/rootfs.sqfs" > /dev/null
 RC=0
-python3 -I "${SCRIPT_DIR}/fwbake.py" verify "${KC}" "${W}/out.pkgtb" "${W}/A" "${W}/B" "${PKG}" > "${W}/report.txt" || RC=$?
+ROGUI_SQFS_BLOCK="${BLOCK}" python3 -I "${SCRIPT_DIR}/fwbake.py" verify "${KC}" "${W}/out.pkgtb" "${W}/A" "${W}/B" "${PKG}" > "${W}/report.txt" || RC=$?
 sed 's/^/   /' "${W}/report.txt"
 if [ "${RC}" -ne 0 ]; then
 	mkdir -p "${OUTDIR}/failed"

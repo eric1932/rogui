@@ -13,8 +13,10 @@
   fp     <www 目录>
          算目录的 /www 指纹，算法和 rogui.sh 的 www_fp()、fwextract.fingerprint() 一致
   verify <原固件.pkgtb> <新固件.pkgtb> <原 rootfs 解开的目录> <新 rootfs 解开的目录> <rogui 补丁包.tgz>
-         逐项对比：/www 以外的每个文件、目录、链接、设备文件完全相同；新 /www 等于"原版 /www + overlay"；
-         打印新 /www 的指纹。全部通过退出码 0，否则 1
+         逐项对比：/www 以外的每个文件、目录、链接、设备文件完全相同；新 /www 等于"原版 /www + overlay − 补丁包 remove.txt 里的文件"；
+         打印新 /www 的指纹和刷进路由器要占的 UBI 块数。全部通过退出码 0，否则 1
+  blocks <固件.pkgtb> [正在跑的固件.pkgtb]
+         打印刷进路由器要占多少 UBI 块；给了正在跑的固件，就算一下这次能不能一次刷完
 """
 import hashlib
 import io
@@ -35,6 +37,30 @@ SQFS_FLAGS = ['UNCOMPRESSED_INODES', 'UNCOMPRESSED_DATA', 'CHECK', 'UNCOMPRESSED
               'ALWAYS_FRAGMENTS', 'DUPLICATES', 'EXPORTABLE', 'UNCOMPRESSED_XATTRS', 'NO_XATTRS',
               'COMPRESSOR_OPTIONS', 'UNCOMPRESSED_IDS']
 SQFS_COMP = {1: 'gzip', 2: 'lzma', 3: 'lzo', 4: 'xz', 5: 'lz4', 6: 'zstd'}
+
+# 刷进路由器占多少 UBI 块（报告 10，GT-BE98 Pro 实测）：刷机库给每段建卷，块数 = ceil(字节 / 126976) + 9。
+# 两个号位加空闲一共 1332 块，刷机写的是备用号位，所以"正在跑的 + 新的 ≤ 1332"。
+# 每个固件不超过一半，从固件版升级到固件版才能一次刷完。别的机器可以用环境变量 ROGUI_UBI_POOL 改总数
+UBI_LEB = 126976
+UBI_EXTRA = 9
+UBI_POOL = int(os.environ.get('ROGUI_UBI_POOL', '1332'))
+
+
+def ubi_blocks(sizes):
+    return sum(-(-s // UBI_LEB) + UBI_EXTRA for s in sizes)
+
+
+def ubi_report(orig_sizes, new_sizes):
+    """打印新固件占多少块，超过一半时提醒（只是提醒，不算检查失败）。"""
+    a, b, half = ubi_blocks(orig_sizes), ubi_blocks(new_sizes), UBI_POOL // 2
+    print('ℹ️  刷进路由器占 %d 个 UBI 块（原版 %d）；两个号位加空闲共 %d 块，一半是 %d' % (b, a, UBI_POOL, half))
+    if b <= half:
+        print('✅ 不超过一半：备用号位里放的也是这么大的固件时，一次就能刷完')
+    elif b <= UBI_POOL - a:
+        print('⚠️  超过一半 %d 块：正在跑的也是固件版时可能放不下，要先刷 KoolCenter 原版、再刷这个。'
+              '用 --slim 精简能变小（报告 10）' % (b - half))
+    else:
+        print('⚠️  太大：另一个号位放原版时也只剩 %d 块，放不下这个固件。先用 --slim 精简（报告 10）' % (UBI_POOL - a))
 
 
 def die(msg):
@@ -246,12 +272,20 @@ def cmd_verify(orig, new, dir_a, dir_b, pkg):
                   '段 %s 原样保留（%d 字节）' % (x['name'], x['size']), '段 %s 变了' % x['name'])
     sa = next(x for x in ia if x['name'] == ra)
     sb = next(x for x in ib if x['name'] == rb)
-    print('ℹ️  根文件系统 %.1fMB → %.1fMB（+%.1fMB），新包 %.1fMB' % (
+    print('ℹ️  根文件系统 %.1fMB → %.1fMB（%+.1fMB），新包 %.1fMB' % (
         sa['size'] / 1048576, sb['size'] / 1048576, (sb['size'] - sa['size']) / 1048576, len(db) / 1048576))
+    ubi_report([x['size'] for x in ia], [x['size'] for x in ib])
     qa = sqfs_info(da[ba + sa['offset']:])
     qb = sqfs_info(db[bb + sb['offset']:])
-    same = {k: (qa[k], qb[k]) for k in ('comp', 'block_size', 'flags', 'has_xattrs', 'comp_opts', 'mkfs_time') if qa[k] != qb[k]}
-    check(not same, 'squashfs 参数和原包相同（%s，块 %d，%s）' % (qb['comp'], qb['block_size'], '+'.join(qb['flags'])),
+    # 实验：bake.sh 用 ROGUI_SQFS_BLOCK 换了块大小时，块大小要等于要求的值，其余参数照旧和原包比
+    want_bs = int(os.environ.get('ROGUI_SQFS_BLOCK') or qa['block_size'])
+    if want_bs != qa['block_size']:
+        check(qb['block_size'] == want_bs, '⚠️ 实验：squashfs 块大小按要求从 %d 改成 %d' % (qa['block_size'], want_bs),
+              'squashfs 块大小是 %d，要求的是 %d' % (qb['block_size'], want_bs))
+    keys = ('comp', 'flags', 'has_xattrs', 'comp_opts', 'mkfs_time') + (() if want_bs != qa['block_size'] else ('block_size',))
+    same = {k: (qa[k], qb[k]) for k in keys if qa[k] != qb[k]}
+    check(not same, 'squashfs %s和原包相同（%s，块 %d，%s）' % (
+              '除块大小以外的参数' if want_bs != qa['block_size'] else '参数', qb['comp'], qb['block_size'], '+'.join(qb['flags'])),
           'squashfs 参数和原包不同: %s' % same)
 
     # /www 以外：逐项相同
@@ -265,10 +299,14 @@ def cmd_verify(orig, new, dir_a, dir_b, pkg):
     check(wa is not None and wb is not None and wa[:4] == wb[:4],
           '/www 目录本身的类型、权限、属主不变', '/www 目录本身变了: %s → %s' % (wa, wb))
 
-    # /www：等于 原版 + overlay
+    # /www：等于 原版 + overlay − 删除清单（精简加的，旧补丁包没有）
     with tarfile.open(pkg) as t:
         ov = t.extractfile('rogui/overlay.tgz').read()
         built_for = t.extractfile('rogui/built_for').read().decode().strip()
+        try:
+            remove = [l for l in t.extractfile('rogui/remove.txt').read().decode('utf-8').split('\n') if l]
+        except KeyError:
+            remove = []
     fp_a, fa, la = www_fp_dir(os.path.join(dir_a, 'www'))
     check(fp_a == built_for, '原固件 /www 指纹 %s 和补丁包的 built_for 一致' % fp_a,
           '补丁包是给 %s 做的，这个固件的 /www 指纹是 %s' % (built_for, fp_a))
@@ -284,10 +322,15 @@ def cmd_verify(orig, new, dir_a, dir_b, pkg):
             elif m.issym():
                 want_l[rel] = m.linkname
                 want_f.pop(rel, None)
+    for rel in remove:
+        rel = os.path.normpath(rel)
+        want_f.pop(rel, None)
+        want_l.pop(rel, None)
     fp_b, fb, lb = www_fp_dir(os.path.join(dir_b, 'www'))
+    what = '原版 /www + overlay' + (' − 删除清单 %d 项' % len(remove) if remove else '')
     check(fb.keys() == want_f.keys() and all(fb[k] == want_f[k] for k in fb) and lb == want_l,
-          '新 /www 正好等于"原版 /www + overlay"：%d 个文件、%d 个链接' % (len(fb), len(lb)),
-          '新 /www 和"原版 + overlay"对不上')
+          '新 /www 正好等于"%s"：%d 个文件、%d 个链接' % (what, len(fb), len(lb)),
+          '新 /www 和"%s"对不上' % what)
     bad_meta = []
     for rel in fb:
         st = os.lstat(os.path.join(dir_b, 'www', rel))
@@ -321,6 +364,14 @@ def main():
         print(www_fp_dir(a[1])[0])
     elif a[:1] == ['verify'] and len(a) == 6:
         sys.exit(cmd_verify(*a[1:]))
+    elif a[:1] == ['blocks'] and len(a) in (2, 3):
+        sizes = [[x['size'] for x in fit_images(open(p, 'rb').read())[2]] for p in a[1:]]
+        n = ubi_blocks(sizes[0])
+        print('%s: %d 块（一半是 %d）' % (os.path.basename(a[1]), n, UBI_POOL // 2))
+        if len(a) == 3:
+            room = UBI_POOL - ubi_blocks(sizes[1])
+            print('正在跑 %s，留给备用号位 %d 块：%s' % (os.path.basename(a[2]), room,
+                  '一次能刷完，剩 %d 块' % (room - n) if n <= room else '放不下，差 %d 块' % (n - room)))
     else:
         print(__doc__.strip())
         sys.exit(2)

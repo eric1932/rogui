@@ -4,7 +4,7 @@
 # 用法:
 #   ./update.sh <KoolCenter 固件.pkgtb> [原厂固件.zip 或 .pkgtb]
 #   ROUTER=admin@192.168.50.1 ./update.sh ...   # 指定打印出的部署命令里的 ssh 目标
-#
+#   ROGUI_SLIM=none ./update.sh ...             # 精简模块（build.py --slim），不写用默认；ROGUI_LANGS 同理
 # 原厂固件不写时，默认用项目目录里文件名排序最新的 FW_GT-BE98_Pro_*.zip。
 # 检查全部通过才算成功；有问题会停下并保留报告，交给人或 AI 判断。
 set -e
@@ -37,7 +37,10 @@ TMP="$(mktemp -d "${DIST}/.build.XXXXXX")"
 trap 'rm -rf "${TMP}"' EXIT
 
 echo "== 1/2 拼补丁包"
-OUT=$(python3 -I "${SCRIPT_DIR}/build.py" --stock "${STOCK}" --kc "${KC}" --out "${TMP}")
+SLIM_ARGS=()
+[ -n "${ROGUI_SLIM:-}" ] && SLIM_ARGS+=(--slim "${ROGUI_SLIM}")
+[ -n "${ROGUI_LANGS:-}" ] && SLIM_ARGS+=(--langs "${ROGUI_LANGS}")
+OUT=$(python3 -I "${SCRIPT_DIR}/build.py" --stock "${STOCK}" --kc "${KC}" --out "${TMP}" ${SLIM_ARGS[@]+"${SLIM_ARGS[@]}"})
 echo "${OUT}" | sed 's/^/   /'
 PKG_TMP=$(echo "${OUT}" | sed -n 's/^输出: //p')
 [ -f "${PKG_TMP}" ] || { echo "没找到输出的补丁包"; exit 1; }
